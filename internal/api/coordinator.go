@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"socialfeed/internal/codec"
 	"socialfeed/internal/hash"
 )
 
@@ -19,6 +20,7 @@ type CoordinatorServer struct {
 	replicas  map[string]string // nodeID -> replica addr
 	threshold int64
 	client    *ShardClient
+	codec     *codec.Codec
 }
 
 // CoordinatorConfig wires the coordinator from parsed topology.
@@ -47,8 +49,26 @@ func NewCoordinator(cfg CoordinatorConfig) *CoordinatorServer {
 		replicas:  cfg.Replicas,
 		threshold: cfg.Threshold,
 		client:    cfg.Client,
+		codec:     newCodecOrPanic(),
 	}
 }
+
+// newCodecOrPanic builds the coordinator's codec (needed to encode fan-out
+// values and decode user/post records read back from shards). It is a startup
+// invariant, so failure to build it is fatal.
+func newCodecOrPanic() *codec.Codec {
+	c, err := codec.New()
+	if err != nil {
+		panic("coordinator: codec init: " + err.Error())
+	}
+	return c
+}
+
+// decode reverses a raw value read from a shard into a model.
+func (c *CoordinatorServer) decode(raw []byte, v any) error { return c.codec.Decode(raw, v) }
+
+// encode serializes a model into the wire value form for a shard write.
+func (c *CoordinatorServer) encode(v any) ([]byte, error) { return c.codec.Encode(v) }
 
 // ShardFor routes an entity ID to its owning shard addr. The ring hashes the
 // entity ID (never a full storage key) so all of an entity's keys land on one
@@ -79,10 +99,12 @@ func (c *CoordinatorServer) Handler() http.Handler {
 	mux.HandleFunc("/health", c.handleHealth)
 	mux.HandleFunc("/cluster", c.handleCluster)
 
-	// Public API — stubbed here, wired in later units.
-	mux.HandleFunc("/users", c.stub)
-	mux.HandleFunc("/users/", c.stub)
-	mux.HandleFunc("/follow", c.stub)
+	// Public API.
+	mux.HandleFunc("/users", c.handleCreateUser)
+	mux.HandleFunc("/users/", c.handleGetUser)
+	mux.HandleFunc("/follow", c.handleFollow)
+	mux.HandleFunc("/unfollow", c.handleUnfollow)
+	// Wired in later units.
 	mux.HandleFunc("/posts", c.stub)
 	mux.HandleFunc("/posts/", c.stub)
 	mux.HandleFunc("/feed/", c.stub)

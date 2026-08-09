@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"socialfeed/internal/models"
 	"socialfeed/internal/storage"
 )
 
@@ -32,6 +33,7 @@ func (s *ShardServer) Handler() http.Handler {
 	mux.HandleFunc("/read", s.handleRead)
 	mux.HandleFunc("/scan", s.handleScan)
 	mux.HandleFunc("/delete", s.handleDelete)
+	mux.HandleFunc("/create-user", s.handleCreateUser)
 	mux.HandleFunc("/follow-edge", s.handleFollowEdge)
 	mux.HandleFunc("/unfollow-edge", s.handleUnfollowEdge)
 	mux.HandleFunc("/replicate", s.handleReplicateStub)
@@ -59,6 +61,11 @@ type scanResponse struct {
 type edgeRequest struct {
 	Followee string `json:"followee"`
 	Follower string `json:"follower"`
+}
+
+type createUserRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type healthResponse struct {
@@ -175,6 +182,27 @@ func (s *ShardServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, map[string]any{"ok": true})
+}
+
+func (s *ShardServer) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req createUserRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed request: "+err.Error())
+		return
+	}
+	err := s.store.CreateUser(models.User{ID: req.ID, Name: req.Name})
+	switch {
+	case err == nil:
+		writeOK(w, map[string]any{"ok": true})
+	case errors.Is(err, storage.ErrExists):
+		writeError(w, http.StatusConflict, "user already exists")
+	default:
+		writeError(w, http.StatusInternalServerError, "create user failed")
+	}
 }
 
 func (s *ShardServer) handleFollowEdge(w http.ResponseWriter, r *http.Request) {

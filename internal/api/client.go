@@ -23,6 +23,9 @@ var (
 	ErrShard = errors.New("shard error")
 	// ErrNotFound means the shard reported the entity is absent (404).
 	ErrNotFound = errors.New("not found")
+	// ErrConflict means the shard reported a conflicting state (409) — e.g. a
+	// duplicate user creation.
+	ErrConflict = errors.New("conflict")
 )
 
 // ShardClient talks to shard nodes over HTTP. Keys are ASCII strings; values
@@ -187,6 +190,19 @@ func (c *ShardClient) edge(kind, addr, followee, follower string) error {
 	code, err := c.doJSON(http.MethodPost, "http://"+addr+"/"+kind, body, nil)
 	if err != nil {
 		return err
+	}
+	return classify(nil, code, "")
+}
+
+// CreateUser creates a user (with self-follow edges) on the owning shard.
+// Returns ErrConflict if the user already exists, ErrDown/ErrShard on failure.
+func (c *ShardClient) CreateUser(addr, id, name string) error {
+	code, err := c.doJSON(http.MethodPost, "http://"+addr+"/create-user", map[string]string{"id": id, "name": name}, nil)
+	if err != nil {
+		return err
+	}
+	if code == http.StatusConflict {
+		return ErrConflict
 	}
 	return classify(nil, code, "")
 }

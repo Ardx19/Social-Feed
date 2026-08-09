@@ -288,17 +288,31 @@ func (s *Store) retry(fn func(txn *badger.Txn) error) error {
 	return errors.New("storage: too many conflict retries")
 }
 
+// ErrExists is returned by CreateUser when the user already exists (no
+// overwrite — re-creating a user would reset FollowerCount and flip celebrity
+// status, and breaks seed idempotency).
+var ErrExists = errors.New("storage: user already exists")
+
 // CreateUser writes the user record plus both self-follow edges in one
 // transaction. FollowerCount starts at 0 (the self-edge is not counted).
+// Returns ErrExists if the user already exists.
 func (s *Store) CreateUser(u models.User) error {
 	enc, err := s.codec.Encode(&u)
 	if err != nil {
 		return err
 	}
-	pairs := []KV{
-		{Key: []byte(keys.UserKey(u.ID)), Value: enc},
-		{Key: []byte(keys.FollowersEdgeKey(u.ID, u.ID)), Value: []byte{}},
-		{Key: []byte(keys.FollowingEdgeKey(u.ID, u.ID)), Value: []byte{}},
-	}
-	return s.Batch(pairs)
+	return s.retry(func(txn *badger.Txn) error {
+		if _, err := txn.Get([]byte(keys.UserKey(u.ID))); err == nil {
+			return ErrExists
+		} else if err != badger.ErrKeyNotFound {
+			return err
+		}
+		if err := txn.Set([]byte(keys.UserKey(u.ID)), enc); err != nil {
+			return err
+		}
+		if err := txn.Set([]byte(keys.FollowersEdgeKey(u.ID, u.ID)), []byte{}); err != nil {
+			return err
+		}
+		return txn.Set([]byte(keys.FollowingEdgeKey(u.ID, u.ID)), []byte{})
+	})
 }

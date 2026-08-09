@@ -181,9 +181,10 @@ func TestPublicAPIStubs(t *testing.T) {
 	ts := httptest.NewServer(coord.Handler())
 	defer ts.Close()
 
-	code, _ := doJSON(t, "POST", ts.URL+"/users", map[string]any{"id": "x"})
+	// /users is wired (U6); /posts is still a stub until U7.
+	code, _ := doJSON(t, "POST", ts.URL+"/posts", map[string]any{"author_id": "x", "content": "hi"})
 	if code != http.StatusNotImplemented {
-		t.Fatalf("stub /users status = %d, want 501", code)
+		t.Fatalf("stub /posts status = %d, want 501", code)
 	}
 }
 
