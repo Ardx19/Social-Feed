@@ -37,7 +37,15 @@ The keys:
 
 ### 3.2 Consistent hashing (Phase 2)
 
-> Filled in during Phase 2.
+**Why a consistent hash ring (hand-implemented, no library):** it is a stated learning goal and the distribution behavior is the whole point — we want to understand why it beats naive modulo. With modulo on N shards, adding/removing a shard moves ~all keys; a ring moves only ~1/N of them.
+
+**How it works:** keys hash onto a circle (a sorted array of `uint32` positions); each physical node owns the arc clockwise from its virtual positions to the next. `GetNode` hashes the key, binary-searches the first position at/after it (wrapping), and returns that physical node.
+
+**Why 150 virtual nodes per physical node:** with one position per node, distribution is uneven (a handful of nodes can own most of the arc). Replicating each node 150 times across the ring evens it out.
+
+**Why MD5, not FNV:** FNV-1a's weak avalanche made sequential keys (`key0`…`key9999`) cluster — one node got ~67% of keys. MD5's strong diffusion spreads both key and node hashes evenly (~33/33/33 across 3 shards).
+
+**Static membership:** `RemoveNode` exists for API completeness but failure handling never calls it — re-hashing on failure would strand every key. Failure means failover to a replica, not ring mutation. This is a deliberate, interview-ready asymmetry: consistent hashing minimizes, not eliminates, the cost of membership change.
 
 ### 3.3 Social graph (Phase 3)
 
