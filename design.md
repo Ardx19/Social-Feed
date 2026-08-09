@@ -49,6 +49,8 @@ The keys:
 
 **Routing by entity ID:** the coordinator's `ShardFor` hashes only the entity ID (user/author/follower), never a full storage key. This is what makes prefix scans work — `feed:{user}:*` must all live on one shard. Hashing a full key would scatter a range scan across the ring and break the read path.
 
+**Deployment / topology:** 7 containers (coordinator + 3 shards + 3 replicas) from one binary, dispatched by subcommand (`./app shard` with `ROLE=replica` for replicas). The coordinator learns the topology from `SHARDS` and `REPLICAS` env; on the Compose network the service name is the host, so the two-segment form `nodeID:port` suffices. Only the coordinator is published to the host — shard ports are internal, so an external client can never read/write a shard directly. Named volumes persist each node's BadgerDB data across restarts.
+
 ### 3.3 Social graph (Phase 3)
 
 > Filled in during Phase 3.

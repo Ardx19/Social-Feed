@@ -131,7 +131,11 @@ func (c *CoordinatorServer) handleCluster(w http.ResponseWriter, r *http.Request
 	writeOK(w, out)
 }
 
-// ParseTopology parses "nodeID:host:port,nodeID:host:port" into a map.
+// ParseTopology parses "nodeID:port" or "nodeID:host:port" into a
+// nodeID -> addr map. The two-segment form (plan.txt's SHARDS contract)
+// assumes the host equals the node ID, which holds on the Compose network
+// where the service name is both. The three-segment form allows an explicit
+// host distinct from the node ID.
 func ParseTopology(s string) map[string]string {
 	out := map[string]string{}
 	for _, part := range strings.Split(s, ",") {
@@ -139,9 +143,11 @@ func ParseTopology(s string) map[string]string {
 		if part == "" {
 			continue
 		}
-		// Split on ':' limited to avoid splitting the host port delimiter.
 		segs := strings.Split(part, ":")
-		if len(segs) == 3 {
+		switch len(segs) {
+		case 2:
+			out[segs[0]] = segs[0] + ":" + segs[1]
+		case 3:
 			out[segs[0]] = segs[1] + ":" + segs[2]
 		}
 	}

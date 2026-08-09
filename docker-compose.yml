@@ -1,0 +1,116 @@
+# Distributed Social Feed Engine — local cluster simulation.
+#
+# One binary (./app) is dispatched by subcommand: coordinator or shard.
+# A replica runs the same shard binary with ROLE=replica (which, per U9,
+# must NOT construct its own outbound replicator).
+#
+# Internal ports: shard1=8081, shard2=8082, shard3=8083,
+#                  replica1=8084, replica2=8085, replica3=8086.
+# Only the coordinator is published to the host (8080).
+
+version: "3.8"
+
+services:
+  coordinator:
+    image: social-feed
+    build: .
+    command: ["coordinator"]
+    ports:
+      - "8080:8080"
+    environment:
+      - SHARDS=shard1:8081,shard2:8082,shard3:8083
+      - REPLICAS=shard1:replica1:8084,shard2:replica2:8085,shard3:replica3:8086
+      - CELEBRITY_THRESHOLD=1000
+    depends_on:
+      - shard1
+      - shard2
+      - shard3
+
+  shard1:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=shard1
+      - PORT=8081
+      - ROLE=primary
+      - REPLICA=replica1:8084
+      - DATA_DIR=/data/shard1
+    volumes:
+      - shard1-data:/data
+    expose: ["8081"]
+
+  shard2:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=shard2
+      - PORT=8082
+      - ROLE=primary
+      - REPLICA=replica2:8085
+      - DATA_DIR=/data/shard2
+    volumes:
+      - shard2-data:/data
+    expose: ["8082"]
+
+  shard3:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=shard3
+      - PORT=8083
+      - ROLE=primary
+      - REPLICA=replica3:8086
+      - DATA_DIR=/data/shard3
+    volumes:
+      - shard3-data:/data
+    expose: ["8083"]
+
+  replica1:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=replica1
+      - PORT=8084
+      - ROLE=replica
+      - DATA_DIR=/data/replica1
+    volumes:
+      - replica1-data:/data
+    expose: ["8084"]
+
+  replica2:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=replica2
+      - PORT=8085
+      - ROLE=replica
+      - DATA_DIR=/data/replica2
+    volumes:
+      - replica2-data:/data
+    expose: ["8085"]
+
+  replica3:
+    image: social-feed
+    build: .
+    command: ["shard"]
+    environment:
+      - NODE_ID=replica3
+      - PORT=8086
+      - ROLE=replica
+      - DATA_DIR=/data/replica3
+    volumes:
+      - replica3-data:/data
+    expose: ["8086"]
+
+volumes:
+  shard1-data:
+  shard2-data:
+  shard3-data:
+  replica1-data:
+  replica2-data:
+  replica3-data:

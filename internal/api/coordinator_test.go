@@ -186,3 +186,23 @@ func TestPublicAPIStubs(t *testing.T) {
 		t.Fatalf("stub /users status = %d, want 501", code)
 	}
 }
+
+func TestParseTopology(t *testing.T) {
+	// Two-segment form (plan.txt / compose): host == nodeID.
+	two := ParseTopology("shard1:8081,shard2:8082,shard3:8083")
+	if len(two) != 3 {
+		t.Fatalf("2-seg topology parsed %d nodes, want 3", len(two))
+	}
+	if two["shard1"] != "shard1:8081" {
+		t.Errorf("shard1 addr = %q, want shard1:8081", two["shard1"])
+	}
+	// Three-segment form: explicit host.
+	three := ParseTopology("s1:10.0.0.1:8081")
+	if three["s1"] != "10.0.0.1:8081" {
+		t.Errorf("3-seg addr = %q", three["s1"])
+	}
+	// Empty input yields empty map, not nil.
+	if got := ParseTopology(""); got == nil || len(got) != 0 {
+		t.Errorf("empty topology = %v, want empty map", got)
+	}
+}
