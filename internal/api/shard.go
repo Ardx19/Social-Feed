@@ -36,7 +36,7 @@ func (s *ShardServer) Handler() http.Handler {
 	mux.HandleFunc("/create-user", s.handleCreateUser)
 	mux.HandleFunc("/follow-edge", s.handleFollowEdge)
 	mux.HandleFunc("/unfollow-edge", s.handleUnfollowEdge)
-	mux.HandleFunc("/replicate", s.handleReplicateStub)
+	mux.HandleFunc("/replicate", s.handleReplicate)
 	mux.HandleFunc("/health", s.handleHealth)
 	return mux
 }
@@ -253,9 +253,36 @@ func (s *ShardServer) handleEdge(w http.ResponseWriter, r *http.Request, unfollo
 	}
 }
 
-func (s *ShardServer) handleReplicateStub(w http.ResponseWriter, r *http.Request) {
-	// Replication is wired in U9.
-	writeError(w, http.StatusNotImplemented, "replication not yet implemented")
+func (s *ShardServer) handleReplicate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Pairs   []keyValue `json:"pairs"`
+		Deletes []string   `json:"deletes"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed request: "+err.Error())
+		return
+	}
+	var ws storage.WriteSet
+	for _, p := range req.Pairs {
+		val, err := base64.StdEncoding.DecodeString(p.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "malformed value")
+			return
+		}
+		ws.Pairs = append(ws.Pairs, storage.KV{Key: []byte(p.Key), Value: val})
+	}
+	for _, d := range req.Deletes {
+		ws.Deletes = append(ws.Deletes, []byte(d))
+	}
+	if err := s.store.ApplyWriteSet(ws); err != nil {
+		writeError(w, http.StatusInternalServerError, "apply failed")
+		return
+	}
+	writeOK(w, map[string]any{"ok": true})
 }
 
 func (s *ShardServer) handleHealth(w http.ResponseWriter, r *http.Request) {

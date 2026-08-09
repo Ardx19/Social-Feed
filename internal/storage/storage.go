@@ -44,12 +44,36 @@ const (
 type Store struct {
 	db    *badger.DB
 	codec *codec.Codec
+	// commitHook, when set (primaries only), is invoked after each successful
+	// write transaction with that transaction's FULL write-set. This is what
+	// makes replication one-txn -> one-op -> one-txn (see design.md).
+	commitHook func(WriteSet)
 }
 
 // KV is a raw key/value byte pair.
 type KV struct {
 	Key   []byte
 	Value []byte
+}
+
+// WriteSet is one committed transaction's write-set: absolute final values
+// (pairs) and deletes. It is the unit of replication — a transaction's whole
+// write-set (e.g. follower edge + incremented count together) rides in one op
+// so the replica can never observe the pair split. See design.md.
+type WriteSet struct {
+	Pairs   []KV
+	Deletes [][]byte
+}
+
+// SetCommitHook installs the post-commit write-set notifier (used by the
+// shard to feed a replicator). Primaries only — replicas never set this, so a
+// replica never replicates onward.
+func (s *Store) SetCommitHook(hook func(WriteSet)) { s.commitHook = hook }
+
+func (s *Store) notify(ws WriteSet) {
+	if s.commitHook != nil {
+		s.commitHook(ws)
+	}
 }
 
 // Open opens (or creates) the BadgerDB at path using the given codec.
@@ -96,12 +120,13 @@ func (s *Store) Delete(key []byte) error {
 	if err != nil {
 		return fmt.Errorf("storage: delete: %w", err)
 	}
+	s.notify(WriteSet{Deletes: [][]byte{key}})
 	return nil
 }
 
 // Batch writes all pairs in ONE transaction (all-or-nothing). Used by the
 // shard's batched write endpoint and by fan-out, where a whole shard batch
-// must apply atomically or not at all.
+// must apply atomically or not at all. The whole batch replicates as one op.
 func (s *Store) Batch(pairs []KV) error {
 	err := s.db.Update(func(txn *badger.Txn) error {
 		for _, p := range pairs {
@@ -113,6 +138,30 @@ func (s *Store) Batch(pairs []KV) error {
 	})
 	if err != nil {
 		return fmt.Errorf("storage: batch: %w", err)
+	}
+	s.notify(WriteSet{Pairs: pairs})
+	return nil
+}
+
+// ApplyWriteSet applies a write-set (pairs + deletes) in ONE transaction. Used
+// by a replica's /replicate handler. It does NOT notify — a replica never
+// replicates onward.
+func (s *Store) ApplyWriteSet(ws WriteSet) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
+		for _, p := range ws.Pairs {
+			if err := txn.Set(p.Key, p.Value); err != nil {
+				return err
+			}
+		}
+		for _, d := range ws.Deletes {
+			if err := txn.Delete(d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("storage: apply writeset: %w", err)
 	}
 	return nil
 }
@@ -270,8 +319,10 @@ func (s *Store) ScanCursor(prefix, fromKey []byte, limit int) ([]KV, error) {
 // Invariant: FollowerCount always equals the number of real follower edges
 // (excluding the self-edge). See design.md.
 func (s *Store) AddFollower(followee, follower string) error {
+	edgeKey := []byte(keys.FollowersEdgeKey(followee, follower))
+	userKey := []byte(keys.UserKey(followee))
+	var enc []byte
 	err := s.retry(func(txn *badger.Txn) error {
-		edgeKey := []byte(keys.FollowersEdgeKey(followee, follower))
 		if _, err := txn.Get(edgeKey); err == nil {
 			return errAlreadyFollowing
 		} else if err != badger.ErrKeyNotFound {
@@ -280,11 +331,21 @@ func (s *Store) AddFollower(followee, follower string) error {
 		if err := txn.Set(edgeKey, []byte{}); err != nil {
 			return err
 		}
-		return s.adjustCount(txn, followee, +1)
+		e, err := s.adjustCount(txn, userKey, +1)
+		if err != nil {
+			return err
+		}
+		enc = e
+		return nil
 	})
 	switch err {
-	case nil, errAlreadyFollowing:
+	case nil:
+		// The follower edge and the incremented count replicate as ONE op so
+		// the replica can never see the pair split (unit-of-work contract).
+		s.notify(WriteSet{Pairs: []KV{{Key: edgeKey, Value: []byte{}}, {Key: userKey, Value: enc}}})
 		return nil
+	case errAlreadyFollowing:
+		return nil // idempotent no-op; nothing written
 	default:
 		return err
 	}
@@ -294,8 +355,10 @@ func (s *Store) AddFollower(followee, follower string) error {
 // decrements FollowerCount only when the edge exists. Unfollow without an
 // edge is an idempotent no-op.
 func (s *Store) RemoveFollower(followee, follower string) error {
+	edgeKey := []byte(keys.FollowersEdgeKey(followee, follower))
+	userKey := []byte(keys.UserKey(followee))
+	var enc []byte
 	err := s.retry(func(txn *badger.Txn) error {
-		edgeKey := []byte(keys.FollowersEdgeKey(followee, follower))
 		if _, err := txn.Get(edgeKey); err == badger.ErrKeyNotFound {
 			return errNotFollowing
 		} else if err != nil {
@@ -304,41 +367,55 @@ func (s *Store) RemoveFollower(followee, follower string) error {
 		if err := txn.Delete(edgeKey); err != nil {
 			return err
 		}
-		return s.adjustCount(txn, followee, -1)
+		e, err := s.adjustCount(txn, userKey, -1)
+		if err != nil {
+			return err
+		}
+		enc = e
+		return nil
 	})
 	switch err {
-	case nil, errNotFollowing:
+	case nil:
+		s.notify(WriteSet{
+			Pairs:   []KV{{Key: userKey, Value: enc}},
+			Deletes: [][]byte{edgeKey},
+		})
 		return nil
+	case errNotFollowing:
+		return nil // idempotent no-op
 	default:
 		return err
 	}
 }
 
 // adjustCount increments or decrements a user's FollowerCount inside an open
-// transaction. Returns ErrNotFound when the followee has no user record.
-func (s *Store) adjustCount(txn *badger.Txn, userID string, delta int64) error {
-	userKey := []byte(keys.UserKey(userID))
+// transaction and returns the new encoded user bytes. Returns ErrNotFound
+// when the followee has no user record.
+func (s *Store) adjustCount(txn *badger.Txn, userKey []byte, delta int64) ([]byte, error) {
 	item, err := txn.Get(userKey)
 	if err == badger.ErrKeyNotFound {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	raw, err := item.ValueCopy(nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var u models.User
 	if err := s.codec.Decode(raw, &u); err != nil {
-		return err
+		return nil, err
 	}
 	u.FollowerCount += delta
 	enc, err := s.codec.Encode(&u)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return txn.Set(userKey, enc)
+	if err := txn.Set(userKey, enc); err != nil {
+		return nil, err
+	}
+	return enc, nil
 }
 
 // retry runs fn in a write transaction, retrying on ErrConflict with capped
@@ -376,18 +453,30 @@ func (s *Store) CreateUser(u models.User) error {
 	if err != nil {
 		return err
 	}
-	return s.retry(func(txn *badger.Txn) error {
-		if _, err := txn.Get([]byte(keys.UserKey(u.ID))); err == nil {
+	userKey := []byte(keys.UserKey(u.ID))
+	selfFollow := []byte(keys.FollowersEdgeKey(u.ID, u.ID))
+	selfFollowing := []byte(keys.FollowingEdgeKey(u.ID, u.ID))
+	err = s.retry(func(txn *badger.Txn) error {
+		if _, err := txn.Get(userKey); err == nil {
 			return ErrExists
 		} else if err != badger.ErrKeyNotFound {
 			return err
 		}
-		if err := txn.Set([]byte(keys.UserKey(u.ID)), enc); err != nil {
+		if err := txn.Set(userKey, enc); err != nil {
 			return err
 		}
-		if err := txn.Set([]byte(keys.FollowersEdgeKey(u.ID, u.ID)), []byte{}); err != nil {
+		if err := txn.Set(selfFollow, []byte{}); err != nil {
 			return err
 		}
-		return txn.Set([]byte(keys.FollowingEdgeKey(u.ID, u.ID)), []byte{})
+		return txn.Set(selfFollowing, []byte{})
 	})
+	if err != nil {
+		return err
+	}
+	s.notify(WriteSet{Pairs: []KV{
+		{Key: userKey, Value: enc},
+		{Key: selfFollow, Value: []byte{}},
+		{Key: selfFollowing, Value: []byte{}},
+	}})
+	return nil
 }

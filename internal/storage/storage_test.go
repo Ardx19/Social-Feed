@@ -238,6 +238,73 @@ func TestConcurrentFollowsConverge(t *testing.T) {
 	}
 }
 
+// TestAddFollowerReplicatesAsOneUnit verifies the replication unit-of-work
+// contract: a follow-edge transaction emits ONE write-set carrying BOTH the
+// follower edge and the incremented count, so a replica can never observe the
+// pair split (see design.md).
+func TestAddFollowerReplicatesAsOneUnit(t *testing.T) {
+	s := newStore(t)
+	_ = s.CreateUser(models.User{ID: "bob", Name: "Bob"})
+
+	var got WriteSet
+	s.SetCommitHook(func(ws WriteSet) { got = ws })
+	if err := s.AddFollower("bob", "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly one write-set, with both the edge and the user record.
+	if len(got.Pairs) != 2 {
+		t.Fatalf("write-set pairs = %d, want 2 (edge + count in one op)", len(got.Pairs))
+	}
+	keys_ := map[string]bool{}
+	for _, p := range got.Pairs {
+		keys_[string(p.Key)] = true
+	}
+	if !keys_[keys.FollowersEdgeKey("bob", "alice")] || !keys_[keys.UserKey("bob")] {
+		t.Errorf("write-set missing edge or count: %v", keys_)
+	}
+}
+
+// TestRemoveFollowerReplicatesEdgeAndDecrement verifies unfollow emits the user
+// record (decremented) plus a delete for the edge in one write-set.
+func TestRemoveFollowerReplicatesEdgeAndDecrement(t *testing.T) {
+	s := newStore(t)
+	_ = s.CreateUser(models.User{ID: "bob", Name: "Bob"})
+	_ = s.AddFollower("bob", "alice")
+
+	var got WriteSet
+	s.SetCommitHook(func(ws WriteSet) { got = ws })
+	if err := s.RemoveFollower("bob", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Pairs) != 1 || len(got.Deletes) != 1 {
+		t.Fatalf("unfollow write-set: pairs=%d deletes=%d, want 1 each", len(got.Pairs), len(got.Deletes))
+	}
+	if string(got.Deletes[0]) != keys.FollowersEdgeKey("bob", "alice") {
+		t.Errorf("unfollow delete = %q", got.Deletes[0])
+	}
+}
+
+// TestApplyWriteSetAppliesAtomically verifies a replica applies pairs + deletes
+// in one transaction.
+func TestApplyWriteSetAppliesAtomically(t *testing.T) {
+	s := newStore(t)
+	if err := s.ApplyWriteSet(WriteSet{
+		Pairs:   []KV{{Key: []byte("a"), Value: []byte("1")}, {Key: []byte("b"), Value: []byte("2")}},
+		Deletes: [][]byte{[]byte("c")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"a", "b"} {
+		if _, found, _ := s.Get([]byte(k)); !found {
+			t.Errorf("applied pair %q missing", k)
+		}
+	}
+	if _, found, _ := s.Get([]byte("c")); found {
+		t.Error("delete was not applied")
+	}
+}
+
 func followerCount(t *testing.T, s *Store, id string) int64 {
 	t.Helper()
 	raw, found, err := s.Get([]byte(keys.UserKey(id)))

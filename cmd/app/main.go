@@ -10,6 +10,7 @@ import (
 
 	"socialfeed/internal/api"
 	"socialfeed/internal/codec"
+	"socialfeed/internal/replication"
 	"socialfeed/internal/storage"
 )
 
@@ -58,11 +59,13 @@ func runCoordinator() {
 }
 
 // runShard starts a shard node from env:
-//   NODE_ID, PORT, ROLE (default primary), REPLICA (unused until U9)
+//   NODE_ID, PORT, ROLE (default primary), REPLICA (replica addr for primary),
+//   DATA_DIR
 func runShard() {
 	id := envOr("NODE_ID", "shard")
 	port := envOr("PORT", "8081")
 	role := envOr("ROLE", "primary")
+	replica := envOr("REPLICA", "")
 	dataDir := envOr("DATA_DIR", "/data/"+id)
 
 	c, err := codec.New()
@@ -74,6 +77,25 @@ func runShard() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
+
+	// Only primaries replicate. A replica must NOT construct a replicator —
+	// same binary, so this is an explicit startup branch; a replica replicating
+	// onward would hammer a non-existent chain (see design.md).
+	if role == "primary" && replica != "" {
+		rep := replication.NewReplicator(replica, 4096)
+		defer rep.Stop()
+		store.SetCommitHook(func(ws storage.WriteSet) {
+			op := replication.Op{}
+			for _, p := range ws.Pairs {
+				op.Pairs = append(op.Pairs, replication.Pair{Key: p.Key, Value: p.Value})
+			}
+			for _, d := range ws.Deletes {
+				op.Deletes = append(op.Deletes, string(d))
+			}
+			rep.Enqueue(op)
+		})
+		log.Printf("shard %s replicating to %s", id, replica)
+	}
 
 	srv := api.NewShard(store, id, role)
 	addr := ":" + port
