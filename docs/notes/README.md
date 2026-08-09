@@ -25,7 +25,7 @@ We're building a distributed system that solves the **fan-out problem**: when a 
 
 | File | Phase | Concepts | Status |
 |------|-------|----------|--------|
-| `01-single-node.md` | 1 — Single node | Embedded storage, key design, compression, range scans, shard HTTP API | **In progress** (data layer done; HTTP server in U2) |
+| `01-single-node.md` | 1 — Single node | Embedded storage, key design, compression, range scans, shard HTTP API | **Done** |
 | `02-cluster.md` | 2 — Cluster | Consistent hashing, virtual nodes, request routing, Docker Compose | Not started |
 | `03-social-graph.md` | 3 — Social graph | Sharding the graph, cross-shard writes, self-follow, atomic increments | Not started |
 | `04-fanout.md` | 4 — Fan-out | Hybrid fan-out, celebrity threshold, author index, scatter-gather, feed merge | Not started |

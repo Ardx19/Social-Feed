@@ -4,7 +4,7 @@
 
 ## What we built
 
-The foundation every other phase builds on: the Go module, the four model structs, the keys package (the single home of every key shape), a shared msgpack+zstd codec, and a BadgerDB storage wrapper that also owns the conditional count-bearing graph transactions. No networking yet — this phase is the data layer only (the HTTP server lands in Phase 2/U2).
+The foundation every other phase builds on: the Go module, the four model structs, the keys package (the single home of every key shape), a shared msgpack+zstd codec, a BadgerDB storage wrapper that also owns the conditional count-bearing graph transactions, and a runnable shard node over HTTP (`./app shard`). Phase 1 ends with a single node that can read/write/scan/delete, handle conditional follow-edge writes, and report health — no distribution yet.
 
 ## Concepts learned
 
@@ -14,6 +14,7 @@ The foundation every other phase builds on: the Go module, the four model struct
 - **Range/prefix scans:** `posts_by_author:{author}:*` returns all of one author's posts as one ordered scan — the primitive everything else builds on.
 - **Compression at rest, measured:** zstd frames have ~10+ bytes overhead, so compressing a tiny Edge inflates it. We skip compression below 64 bytes with a 1-byte flag.
 - **Optimistic concurrency (BadgerDB):** write transactions conflict if they touch a key another committed txn changed; the DB hands you `ErrConflict` and you must retry. This is how concurrent followers on a celebrity serialize.
+- **HTTP transport of binary values:** JSON can't carry raw bytes, so values are base64-encoded on the wire; keys stay ASCII strings. The shard stores opaque bytes — it never decodes values.
 
 ## Key decisions + why
 
@@ -35,6 +36,8 @@ The foundation every other phase builds on: the Go module, the four model struct
 - `internal/keys` — every key shape (build + prefix helpers); `NewID` fixed-width hex
 - `internal/codec` — msgpack + zstd with the raw/compressed flag byte; threshold 64 bytes
 - `internal/storage` — BadgerDB wrapper (Get/Set/Delete/Scan/ScanKeys/Batch) + `CreateUser` + conditional `AddFollower`/`RemoveFollower` with conflict retry
+- `internal/api/shard.go` — the shard's HTTP API: `/write` (single or batch), `/read`, `/scan`, `/delete`, `/follow-edge`/`/unfollow-edge`, `/health`; thin handlers over the store
+- `cmd/app` — single binary dispatching on subcommand (`./app shard`), env-configured
 
 ## Gotchas & edge cases
 
