@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"time"
@@ -184,6 +185,80 @@ func (s *Store) ScanKeys(prefix []byte, limit int, reverse bool) ([][]byte, erro
 	})
 	if err != nil {
 		return nil, fmt.Errorf("storage: scankeys: %w", err)
+	}
+	return out, nil
+}
+
+// ScanPairs iterates keys under prefix in forward order, up to limit, and
+// returns key+value pairs.
+func (s *Store) ScanPairs(prefix []byte, limit int, reverse bool) ([]KV, error) {
+	var out []KV
+	err := s.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.IteratorOptions{Prefix: prefix, Reverse: reverse})
+		defer it.Close()
+		seek := prefix
+		if reverse {
+			high := make([]byte, len(prefix), len(prefix)+1)
+			copy(high, prefix)
+			seek = append(high, 0xff)
+		}
+		for it.Seek(seek); it.ValidForPrefix(prefix); it.Next() {
+			k := it.Item().Key()
+			v, err := it.Item().ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			kc := make([]byte, len(k))
+			copy(kc, k)
+			out = append(out, KV{Key: kc, Value: v})
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage: scanpairs: %w", err)
+	}
+	return out, nil
+}
+
+// ScanCursor iterates keys under prefix in REVERSE (newest-first) starting
+// from fromKey (exclusive — the cursor entry is not re-returned), up to limit
+// (0 = unlimited). Returns key+value pairs. fromKey is the reconstructed seek
+// key for this prefix derived from the LOGICAL (ts, post_id) cursor; when nil,
+// the scan starts from the newest entry. See design.md (logical cursor).
+func (s *Store) ScanCursor(prefix, fromKey []byte, limit int) ([]KV, error) {
+	var out []KV
+	err := s.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.IteratorOptions{Prefix: prefix, Reverse: true})
+		defer it.Close()
+		seek := fromKey
+		if seek == nil {
+			high := make([]byte, len(prefix), len(prefix)+1)
+			copy(high, prefix)
+			seek = append(high, 0xff)
+		}
+		for it.Seek(seek); it.ValidForPrefix(prefix); it.Next() {
+			k := it.Item().Key()
+			if bytes.Equal(k, fromKey) {
+				continue // skip the cursor entry (already shown)
+			}
+			v, err := it.Item().ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			kc := make([]byte, len(k))
+			copy(kc, k)
+			out = append(out, KV{Key: kc, Value: v})
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage: scancursor: %w", err)
 	}
 	return out, nil
 }

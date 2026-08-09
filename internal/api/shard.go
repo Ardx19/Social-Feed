@@ -142,27 +142,41 @@ func (s *ShardServer) handleScan(w http.ResponseWriter, r *http.Request) {
 	prefix := q.Get("prefix")
 	reverse, _ := strconv.ParseBool(q.Get("reverse"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
+	from := q.Get("from") // logical-cursor seek key (newest-first from this position)
 
-	keys, err := s.store.ScanKeys([]byte(prefix), 0, reverse)
+	// A `from` key requests a reverse scan starting at that cursor position
+	// (used by the read path's pagination). Otherwise use a plain scan.
+	var kvs []storage.KV
+	var err error
+	if from != "" {
+		kvs, err = s.store.ScanCursor([]byte(prefix), []byte(from), limit)
+	} else if reverse {
+		pairs, serr := s.store.ScanKeys([]byte(prefix), 0, true)
+		if serr != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed")
+			return
+		}
+		for _, k := range pairs {
+			val, _, _ := s.store.Get(k)
+			kvs = append(kvs, storage.KV{Key: k, Value: val})
+			if limit > 0 && len(kvs) >= limit {
+				break
+			}
+		}
+	} else {
+		kvs, err = s.store.ScanPairs([]byte(prefix), limit, false)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "scan failed")
 		return
 	}
-	entries := make([]keyValue, 0, len(keys))
-	for _, k := range keys {
-		val, _, err := s.store.Get(k)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "scan failed")
-			return
+	entries := make([]keyValue, 0, len(kvs))
+	for _, kv := range kvs {
+		entry := keyValue{Key: string(kv.Key)}
+		if kv.Value != nil {
+			entry.Value = base64.StdEncoding.EncodeToString(kv.Value)
 		}
-		kv := keyValue{Key: string(k)}
-		if val != nil {
-			kv.Value = base64.StdEncoding.EncodeToString(val)
-		}
-		entries = append(entries, kv)
-		if limit > 0 && len(entries) >= limit {
-			break
-		}
+		entries = append(entries, entry)
 	}
 	writeOK(w, scanResponse{Entries: entries})
 }

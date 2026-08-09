@@ -176,18 +176,6 @@ func TestClusterListsTopology(t *testing.T) {
 	}
 }
 
-func TestPublicAPIStubs(t *testing.T) {
-	coord := testCoordinator(t, map[string]string{"s1": fakeShard(t, "s1")}, nil, 1000)
-	ts := httptest.NewServer(coord.Handler())
-	defer ts.Close()
-
-	// /users and /posts are wired (U6/U7); /feed is still a stub until U8.
-	code, _ := doJSON(t, "GET", ts.URL+"/feed/alice", nil)
-	if code != http.StatusNotImplemented {
-		t.Fatalf("stub /feed status = %d, want 501", code)
-	}
-}
-
 func TestParseTopology(t *testing.T) {
 	// Two-segment form (plan.txt / compose): host == nodeID.
 	two := ParseTopology("shard1:8081,shard2:8082,shard3:8083")

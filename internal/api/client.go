@@ -130,6 +130,16 @@ func (c *ShardClient) Read(addr, key string) ([]byte, bool, error) {
 
 // Scan fetches key/value pairs under a prefix. reverse returns newest-first.
 func (c *ShardClient) Scan(addr, prefix string, limit int, reverse bool) ([]Pair, error) {
+	return c.scan(addr, prefix, "", limit, reverse)
+}
+
+// ScanFrom fetches key/value pairs under a prefix in reverse, starting from
+// the cursor seek key (exclusive). Used by feed pagination.
+func (c *ShardClient) ScanFrom(addr, prefix, from string, limit int) ([]Pair, error) {
+	return c.scan(addr, prefix, from, limit, true)
+}
+
+func (c *ShardClient) scan(addr, prefix, from string, limit int, reverse bool) ([]Pair, error) {
 	var out struct {
 		Entries []struct {
 			Key   string `json:"key"`
@@ -137,6 +147,9 @@ func (c *ShardClient) Scan(addr, prefix string, limit int, reverse bool) ([]Pair
 		} `json:"entries"`
 	}
 	u := "http://" + addr + "/scan?prefix=" + url.QueryEscape(prefix) + fmt.Sprintf("&limit=%d&reverse=%v", limit, reverse)
+	if from != "" {
+		u += "&from=" + url.QueryEscape(from)
+	}
 	code, err := c.doJSON(http.MethodGet, u, nil, &out)
 	if err != nil {
 		return nil, err

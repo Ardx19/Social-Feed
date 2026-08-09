@@ -106,13 +106,8 @@ func (c *CoordinatorServer) Handler() http.Handler {
 	mux.HandleFunc("/unfollow", c.handleUnfollow)
 	mux.HandleFunc("/posts", c.handleCreatePost)
 	mux.HandleFunc("/posts/", c.handleGetPost)
-	// Wired in the next unit.
-	mux.HandleFunc("/feed/", c.stub)
+	mux.HandleFunc("/feed/", c.handleGetFeed)
 	return mux
-}
-
-func (c *CoordinatorServer) stub(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotImplemented, "handler wired in a later unit")
 }
 
 func (c *CoordinatorServer) handleHealth(w http.ResponseWriter, r *http.Request) {
