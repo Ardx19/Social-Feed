@@ -47,6 +47,8 @@ The keys:
 
 **Static membership:** `RemoveNode` exists for API completeness but failure handling never calls it — re-hashing on failure would strand every key. Failure means failover to a replica, not ring mutation. This is a deliberate, interview-ready asymmetry: consistent hashing minimizes, not eliminates, the cost of membership change.
 
+**Routing by entity ID:** the coordinator's `ShardFor` hashes only the entity ID (user/author/follower), never a full storage key. This is what makes prefix scans work — `feed:{user}:*` must all live on one shard. Hashing a full key would scatter a range scan across the ring and break the read path.
+
 ### 3.3 Social graph (Phase 3)
 
 > Filled in during Phase 3.

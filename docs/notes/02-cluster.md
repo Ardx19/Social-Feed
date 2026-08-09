@@ -4,7 +4,7 @@
 
 ## What we built
 
-*(coordinator + ring + compose — filled in after U4/U5)*
+The hash ring (U3) and the coordinator (U4): a single `./app coordinator` that owns the ring, routes every entity ID to its shard via `ShardFor`, wraps shard calls in a client that classifies missing / shard-error / down, and exposes `/health` + `/cluster`. The public API surface (users/follow/posts/feed) is wired as 501 stubs to be filled by U6–U8.
 
 ## Concepts learned
 
@@ -13,6 +13,7 @@
 - **Hash quality matters:** FNV-1a's weak avalanche made sequential keys cluster (one node got 67%); MD5's strong diffusion fixed it (~33/33/33).
 - **Routing by entity ID, not the full key:** a range scan (`feed:{user}:*`) needs every key of an entity on one shard, so the ring hashes the entity ID, never a full storage key.
 - **Static ring membership:** removing a failed node re-hashes and strands keys; failure means failover to a replica, not ring mutation.
+- **Error taxonomy:** the coordinator classifies shard responses into missing (200 + null), shard-error (5xx), down (connection/timeout). Missing is NOT an error — an empty feed must render as empty, not fail.
 
 ## Key decisions + why
 
@@ -24,19 +25,21 @@
 | Route by entity ID only | Range scans need all of an entity's keys on one shard | Hashing the full key |
 | Static ring membership | Re-hashing on failure strands keys; fail over instead | `RemoveNode` on failure |
 | Single binary `./app` with subcommands | One build, 7 compose services dispatch on subcommand | Two binaries |
+| Error taxonomy (missing/shard-error/down) | Coordinator must distinguish "empty" from "failed" and "down" | Confusing all three |
+| Public API stubbed at U4 | Surface exists and is testable before handlers land | Wiring handlers ad hoc |
 
 ## Structure map
 
 - `internal/hash` — the consistent hash ring (virtual nodes, MD5, binary-search clockwise)
-- `cmd/coordinator` — *(U4)*
-- `internal/api/coordinator.go` — *(U4)*
-- `internal/api/client.go` — *(U4)*
-- `Dockerfile`, `docker-compose.yml` — *(U5)*
+- `internal/api/coordinator.go` — ring + topology + `ShardFor` + `/health` + `/cluster` + public-API stubs
+- `internal/api/client.go` — shard HTTP client; classifies missing/shard-error/down; base64 values on the wire
+- `cmd/app` — `./app coordinator` and `./app shard`
 
 ## Gotchas & edge cases
 
 - **FNV clustering:** the distribution test caught this — sequential keys are correlated under FNV-1a. The lesson: verify distribution with a test, don't assume.
-- **Empty ring:** `GetNode` on an empty ring must error clearly, not panic (indexing into an empty slice).
+- **Empty ring:** `GetNode` on an empty ring must error clearly, not panic.
+- **Query escaping:** keys contain `:` and `{}`; naive percent-replacement breaks on `&`/`#` — use `url.QueryEscape`, not a hand-rolled escaper.
 
 ## Interview talking points
 
@@ -44,3 +47,4 @@
 - "Why 150 virtual nodes?" — even distribution. With few positions, one node can own most of the arc.
 - "What happens when a node dies?" — we do NOT remove it from the ring (that strands keys); we fail reads over to its replica. Consistent hashing minimizes reshard cost, it doesn't eliminate it.
 - "Why route by entity ID?" — a range scan must stay on one shard; hashing the full key would scatter it.
+- "How do you tell empty from failed?" — the error taxonomy: missing vs shard-error vs down. An empty feed is `200 []`, never a 500.
