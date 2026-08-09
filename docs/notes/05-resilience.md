@@ -4,7 +4,7 @@
 
 ## What we built
 
-*(replication done in U9; heartbeat/failover/queue land in U10)*
+Async replication (U9): a primary's committed transactions replicate to its replica as absolute final values over an ordered channel. Heartbeat + failover + write queue (U10): the coordinator pings every node, marks one down after 3 misses, routes reads to the replica, queues offline-materializable writes to a down primary (replaying on recovery), and never queues post creation (502). Verified live: stopped a shard, reads still served from the replica, posting to it returned 502, and it recovered on restart.
 
 ## Concepts learned
 
@@ -28,24 +28,34 @@
 | `ROLE=replica` never constructs a replicator | Same binary; a replica replicating onward hammers a non-existent chain | — |
 | Replicator ≠ coordinator write-queue | Replicator drops on overflow (stale replica); queue must not drop (503). Same shape, opposite guarantees — name them distinctly | Conflating them |
 | Heartbeat 5s, 3 misses → down | Bounded detection window (~15s) | Immediate detection (impossible) |
+| Read failover to replica | Availability during the detection window; one-retry on the undetected-death window | Fail hard |
+| Queue covers only offline-materializable writes | A-side follow edges, unfollows, deletes; post creation's gate lives on the down shard so it 502s instead | Queue everything (silent fan-out loss) |
+| Queue overflow → 503, never silent drop | Acknowledged loss on a 200 is the worst outcome | Drop silently |
 
 ## Structure map
 
 - `internal/replication/replicator.go` — ordered channel, single drain, drop-newest, POSTs absolute values
-- `internal/storage` — commit hook emitting each txn's full WriteSet; `ApplyWriteSet` for the replica
+- `internal/api/heartbeat.go` — HealthMonitor: 3 misses → down, recovery drains the queue
+- `internal/api/writequeue.go` — bounded queue (503 on overflow), idempotent replay
+- `internal/api/failover.go` — readAddrFor (replica when primary down), readWithFailover (one-retry), writeToShard (queue-eligible), drainQueue
 - `internal/api/shard.go` — `/replicate` endpoint (applies a write-set as one txn)
+- `internal/storage` — commit hook emitting each txn's full WriteSet; `ApplyWriteSet`
 - `cmd/app` — primary wires the replicator from `REPLICA` env; replica does not
 
 ## Gotchas & edge cases
 
 - **The URL needs a scheme:** the replicator must build `http://` + host:port + `/replicate`; passing a bare `host:port` breaks the POST. Caught by a test.
 - **Store writes replicate via the hook, not the handler:** the commit hook fires on `Batch`/`Delete`/`CreateUser`/`AddFollower`/`RemoveFollower` — so a follow-edge's edge + count land as one op. `ApplyWriteSet` (the replica side) does NOT notify, so a replica never replicates onward.
-- **Idempotent no-ops don't replicate:** a duplicate follow emits nothing (nothing was written), so it can't heal a prior drop — which is exactly why the edge+count must ride together in the original op.
+- **Idempotent no-ops don't replicate:** a duplicate follow emits nothing, so it can't heal a prior drop — which is exactly why the edge+count must ride together in the original op.
+- **Post creation is never queued:** its celebrity gate and fan-out pairs need the down shard, so queuing would drain as post+index and silently lose fan-out. It returns 502 instead.
+- **Queue loss on coordinator restart** is an accepted gap (documented) — the queue is in-memory.
+- **Live-drill lesson:** the heartbeat window is ~15s; a resilience demo must script the wait, and reads fail over to the replica during the outage.
 
 ## Interview talking points
 
 - "How do you avoid data loss with async replication?" — you don't fully; that's the tradeoff. Fire-and-forget means a window of possible loss (the accepted gap, `design.md`). You bound it by replicating absolute values so retries are idempotent and self-healing.
 - "Why final values and not operations?" — replaying "increment" double-applies; replaying the final count is idempotent. That's why the transaction's whole write-set is the unit.
 - "How do you keep a replica's per-key order?" — one ordered channel, one drain goroutine. Ordering by construction beats trying to order N concurrent POSTs.
-- "What happens on buffer overflow?" — the newest op is dropped and logged; the replica is stale on those keys until the next write re-sends a fresh absolute value. Self-healing under traffic.
-- "Why can't a replica replicate onward?" — same binary; the role gate at startup prevents a replication loop.
+- "What happens when a shard dies?" — the heartbeat marks it down after 3 misses; reads fail over to the replica; offline-materializable writes queue and replay on recovery; post creation fails with 502 rather than silently losing fan-out. Ring membership stays static.
+- "Why 502 for posts and not queue them?" — a queued post would drain without fan-out (the gate + pairs live on the down shard), silently losing delivery beyond the accepted scope.
+- "What's the 15s window?" — between the primary dying and the heartbeat marking it down, reads get one retry via the replica, then error; that's the availability tradeoff of bounded detection.
