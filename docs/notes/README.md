@@ -28,7 +28,7 @@ We're building a distributed system that solves the **fan-out problem**: when a 
 | `01-single-node.md` | 1 — Single node | Embedded storage, key design, compression, range scans, shard HTTP API | **Done** |
 | `02-cluster.md` | 2 — Cluster | Consistent hashing, virtual nodes, request routing, Docker Compose | **Done** |
 | `03-social-graph.md` | 3 — Social graph | Sharding the graph, cross-shard writes, self-follow, atomic increments | **Done** |
-| `04-fanout.md` | 4 — Fan-out | Hybrid fan-out, celebrity threshold, author index, scatter-gather, feed merge | Not started |
+| `04-fanout.md` | 4 — Fan-out | Hybrid fan-out, celebrity threshold, author index, scatter-gather, feed merge | **Done** |
 | `05-resilience.md` | 5 — Resilience | Async replication, heartbeat, failure detection, failover, write queue | Not started |
 | `06-polish.md` | 6 — Polish | Frontend, seed data, demo, design doc assembly | Not started |
 

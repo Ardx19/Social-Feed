@@ -4,35 +4,52 @@
 
 ## What we built
 
-*(filled in after the phase)*
+`POST /posts` writes a post + author index to the author's shard in one transaction, checks FollowerCount, and either fans out a denormalized FeedEntry to every follower's shard (one batched write per shard, failures logged-and-skipped) or does nothing for a celebrity. `GET /feed/{user}` merges the fan-out entries with each celebrity's recent posts (fetched lazily via the author index), newest-first, deduped, with logical-cursor pagination.
 
 ## Concepts learned
 
-*(fan-out on write vs read vs hybrid, write amplification, celebrity threshold, author index, scatter-gather, dedupe, cursor pagination, coordinator-stamped timestamps)*
+- **Hybrid fan-out:** eager (on write) for normal users, lazy (on read) for celebrities — the Twitter-style tradeoff that bounds write amplification.
+- **Write amplification:** a normal user's post is copied into every follower's feed. Denormalized content means a feed renders in one scan, at the cost of duplicated storage.
+- **Celebrity threshold as a gate:** FollowerCount decides which path runs. This is why the count invariant matters so much.
+- **Author index:** `posts_by_author:{author}:{ts}:{post}` makes "recent posts by celebrity" a single-shard range scan. `posts:{id}` can't — post IDs hash across shards.
+- **Scatter-gather:** reading a feed fans out across potentially many shards in parallel (followee counts, celebrity scans), then merges.
+- **Logical cursor:** a merged page spans multiple key prefixes on different shards, so the cursor can't be a single physical key — it's the `(ts, post_id)` position, and each source rebuilds its own seek key.
+- **Arbitrary-but-deterministic ordering:** Go serves POSTs concurrently; two posts in the same nanosecond sort by post ID — stable, not creation order.
 
 ## Key decisions + why
 
 | Decision | Why | Rejected alternative |
 |----------|-----|----------------------|
-| Hybrid fan-out (threshold 1000) | Eager for normal users, lazy for celebrities — the Twitter-style tradeoff | Pure write fan-out / pure read fan-out |
+| Hybrid fan-out (threshold 1000) | Eager for normal users, lazy for celebrities | Pure write / pure read fan-out |
 | Author index `posts_by_author:{author}:{ts}:{post}` | Celebrity reads are a single-shard scan | Scanning all posts (unimplementable cross-shard) |
 | Denormalized feed content | Feed renders in one scan, no N+1 fetches | Pointer-only FeedEntry + post fetch per entry |
-| Coordinator stamps one ns timestamp per post | Single source, no cross-shard clock skew, mergeable | Shard-stamped timestamps |
-| Same-ns ties are arbitrary-but-deterministic | Go serves POSTs concurrently; secondary post-ID sort is stable, not creation order — say it precisely | Claim "creation order" |
+| Coordinator stamps one ns timestamp per post | Single source of truth, no cross-shard clock skew | Shard-stamped timestamps |
+| Same-ns ties arbitrary-but-deterministic | Go serves POSTs concurrently; secondary post-ID sort is stable, not creation order | Claim "creation order" |
 | Merge dedupes by post ID | Threshold-crossing post appears via both paths; show it once | Let duplicates through |
-| **Pagination cursor is LOGICAL `(ts19, post_id)`, not a physical key** | Merged pages span `feed:{user}:*` and celebrity `posts_by_author:*` on different shards — one physical key can't seek into both. Each scan reconstructs its own prefix's seek key from the tuple | Physical-key cursor (drops/repeats celebrity posts across pages once one is in the mix) |
 | Post to down author shard → 502, never queued | Gate + fan-out pairs can't be materialized offline | Queue it (silent fan-out loss) |
 | One BadgerDB transaction per shard batch | All-or-nothing per shard, matches log-and-skip failure model | Per-entry writes |
+| Logical cursor `(ts, post_id)`, reconstructed per prefix | Merged pages span multiple prefixes/shards; one physical key can't seek into both | Physical-key cursor (drops/repeats celebrity posts across pages) |
+| Post→author map for `GET /posts/{id}` | Random post IDs aren't routable by entity ID; map routes via the author | Scanning for the post |
 
 ## Structure map
 
-- `internal/fanout/writer.go` — post materialization + batched fan-out
-- `internal/fanout/reader.go` — merge + dedupe + cursor pagination
-- `internal/api/coordinator.go` — post/feed handlers; in-memory post→author map
+- `internal/fanout/fanout.go` — `CreatePost`: materialize post+index, celebrity gate, batched fan-out
+- `internal/fanout/reader.go` — `Merge`: sort, dedupe, truncate, logical cursor (pure)
+- `internal/api/writer.go` — `POST /posts`, `GET /posts/{id}`, post→author map
+- `internal/api/reader.go` — `GET /feed/{user}` orchestration, celebrity scatter-gather
 
 ## Gotchas & edge cases
 
-*(threshold crossing both directions, empty feed = 200 [], deterministic tie order, partial fan-out loss on a down shard)*
-*(unfollow residue: non-celebrity posts already fanned out stay in the follower's feed forever (no cleanup job) while celebrity posts vanish instantly — the write-path/read-path asymmetry; named gap with production answer: cleanup job / tombstone-on-read)*
+- **Threshold crossing:** a post made before the author crosses the threshold appears via fan-out; the same post later fetched via the celebrity path would duplicate — dedupe by post_id in the merge kills it.
+- **Celebrity own-posts need the self-edge in the followee set:** a celebrity's own feed is empty via fan-out (none happens); they see their own posts only because self is a followee AND a celebrity. Don't filter the self-edge out of the followee list.
+- **Cursor must be logical, not a physical key:** once a celebrity is in the followee set, the merged page spans two prefixes; a single physical feed key can't seek into the celebrity's author index. Rebuild each source's seek key from `(ts, post_id)`.
+- **Empty feed is `200 []`, not an error:** the missing-vs-error taxonomy. And a mistyped user ID should 404 (unknown user), not render a misleading empty feed.
+- **Follower-ID extraction:** IDs are validated to contain no `:`, so parsing `graph:followers:{user}:{follower}` is a safe split on the last `:`.
 
 ## Interview talking points
+
+- "Why hybrid fan-out?" — eager fan-out is write-amplified and unbounded for celebrities; lazy makes reads expensive. The threshold splits the difference: normal users' feeds are cheap to read, celebrities don't blast every follower's feed.
+- "How does a celebrity post reach followers?" — lazily, on read: fetch the follower list, find which are celebrities by FollowerCount, scan their author index, merge. The author index is what makes it a bounded scatter-gather instead of a full scan.
+- "Why denormalize content into every feed?" — one scan renders the feed. Cost is storage amplification; the alternative is N+1 post fetches per read. Interview tradeoff.
+- "How does pagination work across celebrity + normal sources?" — the cursor is a logical (timestamp, post_id) position; each source rebuilds its own seek key from it. No single physical key can span both prefixes.
+- "What if the count drifts?" — the celebrity gate reads the same FollowerCount used for fan-out; a wrong count silently takes the wrong path. That's why the conditional-transaction invariant matters.
