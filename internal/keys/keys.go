@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // The keys package is the ONLY place key shapes are assembled and parsed.
@@ -71,3 +72,26 @@ func FollowingEdgeKey(user, followee string) string {
 
 // FollowingPrefix is graph:following:{user}: — "who user follows".
 func FollowingPrefix(user string) string { return "graph:following:" + user + ":" }
+
+// FollowersEdgeParts parses "graph:followers:{user}:{follower}". Because IDs
+// are validated to contain no ':', the follower is always the last segment.
+func FollowersEdgeParts(key string) (user, follower string, ok bool) {
+	return parseEdge(key, "graph:followers:")
+}
+
+// FollowingEdgeParts parses "graph:following:{user}:{followee}".
+func FollowingEdgeParts(key string) (user, followee string, ok bool) {
+	return parseEdge(key, "graph:following:")
+}
+
+func parseEdge(key, prefix string) (string, string, bool) {
+	if !strings.HasPrefix(key, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, prefix)
+	idx := strings.LastIndex(rest, ":")
+	if idx <= 0 || idx == len(rest)-1 {
+		return "", "", false
+	}
+	return rest[:idx], rest[idx+1:], true
+}

@@ -104,9 +104,9 @@ func (c *CoordinatorServer) Handler() http.Handler {
 	mux.HandleFunc("/users/", c.handleGetUser)
 	mux.HandleFunc("/follow", c.handleFollow)
 	mux.HandleFunc("/unfollow", c.handleUnfollow)
-	// Wired in later units.
-	mux.HandleFunc("/posts", c.stub)
-	mux.HandleFunc("/posts/", c.stub)
+	mux.HandleFunc("/posts", c.handleCreatePost)
+	mux.HandleFunc("/posts/", c.handleGetPost)
+	// Wired in the next unit.
 	mux.HandleFunc("/feed/", c.stub)
 	return mux
 }
