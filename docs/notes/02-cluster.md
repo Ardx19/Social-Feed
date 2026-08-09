@@ -34,12 +34,17 @@ The hash ring (U3) and the coordinator (U4): a single `./app coordinator` that o
 - `internal/api/coordinator.go` — ring + topology + `ShardFor` + `/health` + `/cluster` + public-API stubs
 - `internal/api/client.go` — shard HTTP client; classifies missing/shard-error/down; base64 values on the wire
 - `cmd/app` — `./app coordinator` and `./app shard`
+- `Dockerfile` — single multi-stage build producing `/app`
+- `docker-compose.yml` — 7 services, named volumes, internal-only shard ports
+- `scripts/cluster.sh` — raw-docker cluster bring-up (workaround for docker-compose v1 vs Docker 29)
 
 ## Gotchas & edge cases
 
 - **FNV clustering:** the distribution test caught this — sequential keys are correlated under FNV-1a. The lesson: verify distribution with a test, don't assume.
 - **Empty ring:** `GetNode` on an empty ring must error clearly, not panic.
 - **Query escaping:** keys contain `:` and `{}`; naive percent-replacement breaks on `&`/`#` — use `url.QueryEscape`, not a hand-rolled escaper.
+- **Topology parse form:** `SHARDS=nodeID:port` is the two-segment form where host == nodeID (Compose service name is the host). A three-segment `nodeID:host:port` form allows an explicit host. Getting this wrong silently drops all nodes.
+- **Compose v1 vs Docker 29:** `docker-compose up` can fail with a `ContainerConfig` KeyError on newer Docker daemons. `scripts/cluster.sh` uses raw `docker run` with the right `--network-alias` (the alias is what lets the coordinator resolve `shard1`, not the container name) as a drop-in.
 
 ## Interview talking points
 
