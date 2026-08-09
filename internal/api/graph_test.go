@@ -131,3 +131,29 @@ func TestUnfollowWhenNotFollowing(t *testing.T) {
 		t.Fatalf("unfollow-when-not-following status = %d, want 200 (idempotent no-op)", code)
 	}
 }
+
+func TestFollowingList(t *testing.T) {
+	ts := publicCoordinator(t)
+	_, _ = doJSON(t, "POST", ts.URL+"/users", map[string]any{"id": "alice", "name": "Alice"})
+	_, _ = doJSON(t, "POST", ts.URL+"/users", map[string]any{"id": "bob", "name": "Bob"})
+	_, _ = doJSON(t, "POST", ts.URL+"/users", map[string]any{"id": "carol", "name": "Carol"})
+	_, _ = doJSON(t, "POST", ts.URL+"/follow", map[string]any{"follower": "alice", "followee": "bob"})
+	_, _ = doJSON(t, "POST", ts.URL+"/follow", map[string]any{"follower": "alice", "followee": "carol"})
+
+	code, out := doJSON(t, "GET", ts.URL+"/users/alice/following", nil)
+	if code != http.StatusOK {
+		t.Fatalf("following status = %d", code)
+	}
+	following, _ := out["following"].([]any)
+	// bob + carol, and the self-edge excluded.
+	if len(following) != 2 {
+		t.Fatalf("following = %v, want 2 (bob, carol)", following)
+	}
+	got := map[string]bool{}
+	for _, f := range following {
+		got[f.(string)] = true
+	}
+	if !got["bob"] || !got["carol"] || got["alice"] {
+		t.Errorf("following = %v, self-edge must be excluded", got)
+	}
+}

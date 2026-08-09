@@ -1,0 +1,12 @@
+# Go
+/app
+
+# Frontend — keep node_modules and build output out of the Docker context
+frontend/node_modules
+frontend/dist
+
+# Git / editor
+.git
+.gitignore
+docs
+*.md
