@@ -1,7 +1,7 @@
 ---
 title: Build Distributed Social Feed Engine
 type: feat
-status: active
+status: completed
 date: 2026-08-10
 origin: docs/brainstorms/distributed-social-feed-engine-requirements.md
 deepened: 2026-08-10
