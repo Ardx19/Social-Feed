@@ -45,17 +45,26 @@ func (c *CoordinatorServer) handleGetFeed(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 1. Fan-out-path entries from the user's own shard.
-	_, userAddr, err := c.ShardFor(user)
+	// 1. Fan-out-path entries from the user's own shard (failover-aware).
+	userNode, userAddr, err := c.readAddrFor(user)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "no shard")
 		return
 	}
 	fanoutEntries, err := c.scanFeed(userAddr, keys.FeedPrefix(user), user, before, limit)
 	if err != nil {
-		// User's own shard failed -> 502 (replica retry handled in U10).
-		writeError(w, http.StatusBadGateway, "feed unavailable")
-		return
+		// User's own shard failed; one replica retry before surfacing 502.
+		if rep, ok := c.monitor.ReplicaFor(userNode); ok {
+			if retry, rerr := c.scanFeed(rep, keys.FeedPrefix(user), user, before, limit); rerr == nil {
+				fanoutEntries = retry
+			} else {
+				writeError(w, http.StatusBadGateway, "feed unavailable")
+				return
+			}
+		} else {
+			writeError(w, http.StatusBadGateway, "feed unavailable")
+			return
+		}
 	}
 
 	// 2. Followee list (who the user follows), from the user's shard.

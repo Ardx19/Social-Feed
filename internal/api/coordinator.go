@@ -5,15 +5,15 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"socialfeed/internal/codec"
 	"socialfeed/internal/hash"
 )
 
 // CoordinatorServer routes requests to shards by entity ID and exposes the
-// public API. It owns the ring and the topology (shards + their replicas).
-// The public handlers for users/posts/feed/follow are stubbed here and wired
-// in later units.
+// public API. It owns the ring, the topology, the health monitor (failover),
+// and the write queue.
 type CoordinatorServer struct {
 	ring      *hash.Ring
 	shards    map[string]string // nodeID -> addr
@@ -21,18 +21,32 @@ type CoordinatorServer struct {
 	threshold int64
 	client    *ShardClient
 	codec     *codec.Codec
+	monitor   *HealthMonitor
+	queue     *WriteQueue
 }
 
 // CoordinatorConfig wires the coordinator from parsed topology.
 type CoordinatorConfig struct {
-	Shards    map[string]string
-	Replicas  map[string]string
+	Shards   map[string]string
+	Replicas map[string]string
 	Threshold int64
-	Client    *ShardClient
+	Client   *ShardClient
+
+	// Heartbeat tuning; zero values use the defaults.
+	HeartbeatInterval time.Duration
+	HeartbeatMisses   int
+	QueueSize         int
 }
+
+const (
+	defaultHeartbeatInterval = 5 * time.Second
+	defaultHeartbeatMisses   = 3
+	defaultQueueSize         = 1024
+)
 
 // NewCoordinator builds the coordinator, seeding the ring with every shard
 // node ID. Ring membership is static — nodes are never removed for failure.
+// It starts a health monitor and a write queue.
 func NewCoordinator(cfg CoordinatorConfig) *CoordinatorServer {
 	ring := hash.NewRing(150)
 	ids := make([]string, 0, len(cfg.Shards))
@@ -43,14 +57,33 @@ func NewCoordinator(cfg CoordinatorConfig) *CoordinatorServer {
 	for _, id := range ids {
 		ring.AddNode(id)
 	}
-	return &CoordinatorServer{
+
+	interval := cfg.HeartbeatInterval
+	if interval <= 0 {
+		interval = defaultHeartbeatInterval
+	}
+	misses := cfg.HeartbeatMisses
+	if misses <= 0 {
+		misses = defaultHeartbeatMisses
+	}
+	queueSize := cfg.QueueSize
+	if queueSize <= 0 {
+		queueSize = defaultQueueSize
+	}
+
+	c := &CoordinatorServer{
 		ring:      ring,
 		shards:    cfg.Shards,
 		replicas:  cfg.Replicas,
 		threshold: cfg.Threshold,
 		client:    cfg.Client,
 		codec:     newCodecOrPanic(),
+		queue:     NewWriteQueue(queueSize),
 	}
+	c.monitor = NewHealthMonitor(cfg.Client, cfg.Shards, cfg.Replicas, interval, misses)
+	c.monitor.SetOnRecover(c.drainQueue)
+	c.monitor.Start()
+	return c
 }
 
 // newCodecOrPanic builds the coordinator's codec (needed to encode fan-out

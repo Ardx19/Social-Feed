@@ -59,12 +59,12 @@ func (c *CoordinatorServer) handleGetUser(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid user ID")
 		return
 	}
-	_, addr, err := c.ShardFor(id)
+	nodeID, addr, err := c.readAddrFor(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "no shard for user")
 		return
 	}
-	raw, found, rerr := c.client.Read(addr, keys.UserKey(id))
+	raw, found, rerr := c.readWithFailover(nodeID, addr, keys.UserKey(id))
 	switch {
 	case rerr != nil:
 		writeError(w, http.StatusServiceUnavailable, "read failed")

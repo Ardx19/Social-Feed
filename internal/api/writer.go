@@ -74,10 +74,22 @@ func (c *CoordinatorServer) handleCreatePost(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Never queue post creation: the celebrity gate and fan-out pairs live on
+	// the author's shard, so they cannot be materialized offline (design.md).
+	// If the author's primary is down, the post fails with 502.
+	authorNode, _, err := c.ShardFor(req.AuthorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "no shard")
+		return
+	}
+	if c.monitor != nil && c.monitor.IsDown(authorNode) {
+		writeError(w, http.StatusBadGateway, "author shard unavailable")
+		return
+	}
+
 	postID, err := fanout.CreatePost(c, c, c.codec, req.AuthorID, req.Content, c.threshold)
 	if err != nil {
-		// Author's shard unreachable or write failed -> 502, never queued
-		// (post fan-out cannot be materialized offline; see design.md).
+		// Author's shard unreachable or write failed -> 502, never queued.
 		writeError(w, http.StatusBadGateway, "post creation failed")
 		return
 	}

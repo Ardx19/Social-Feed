@@ -52,16 +52,27 @@ func (c *CoordinatorServer) handleEdge(w http.ResponseWriter, r *http.Request, u
 		return
 	}
 
-	// A-side: plain following-edge write on the follower's shard.
-	_, followerAddr, err := c.ShardFor(req.Follower)
+	// A-side: following edge on the follower's shard. Queue-eligible — its key/
+	// value is materializable without reading the down shard, so if the
+	// follower's primary is down we queue it (replayed on recovery) rather than
+	// fail the follow. Post creation is the exception that is NEVER queued.
+	followerNode, followerAddr, err := c.ShardFor(req.Follower)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "no shard")
 		return
 	}
-	akey := []byte(keys.FollowingEdgeKey(req.Follower, req.Followee))
-	if err := c.client.Write(followerAddr, []byteKV{{Key: string(akey)}}); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "follower edge write failed")
+	akey := keys.FollowingEdgeKey(req.Follower, req.Followee)
+	op := QueuedOp{Addr: followerAddr, Pairs: []byteKV{{Key: akey}}}
+	queued, werr := c.writeToShard(followerNode, followerAddr, op, func() error {
+		return c.client.Write(followerAddr, op.Pairs)
+	})
+	switch {
+	case werr == ErrQueueFull:
+		writeError(w, http.StatusServiceUnavailable, "write queue full")
 		return
+	case queued:
+		log.Printf("follow: A-side queued (follower shard %s down); will replay on recovery", followerNode)
+		// Accepted; proceed to B-side best-effort below.
 	}
 
 	// B-side: count-bearing transaction on the followee's shard.
@@ -86,12 +97,12 @@ func (c *CoordinatorServer) handleEdge(w http.ResponseWriter, r *http.Request, u
 	writeOK(w, map[string]any{"ok": true})
 }
 
-// userExists reports whether a user record exists on its shard.
+// userExists reports whether a user record exists (via failover-aware read).
 func (c *CoordinatorServer) userExists(id string) bool {
-	_, addr, err := c.ShardFor(id)
+	nodeID, addr, err := c.readAddrFor(id)
 	if err != nil {
 		return false
 	}
-	_, found, err := c.client.Read(addr, keys.UserKey(id))
+	_, found, err := c.readWithFailover(nodeID, addr, keys.UserKey(id))
 	return err == nil && found
 }
