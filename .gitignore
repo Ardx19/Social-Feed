@@ -1,0 +1,21 @@
+# Go
+/app
+/bin/
+*.test
+*.out
+
+# Local runtime data
+/data/
+*.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Worktree scratch (ce-work subagent isolation)
+.opencode/worktrees/

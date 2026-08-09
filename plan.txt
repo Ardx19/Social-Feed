@@ -1,0 +1,334 @@
+Distributed Social Feed Engine — Complete Project Plan
+Problem Statement
+
+Build a distributed system that solves the fan-out problem: when a user posts something, how do you efficiently deliver it to all their followers — across a distributed, sharded backend — without destroying your infrastructure.
+
+Concepts You Will Learn By Building
+Consistent hashing and why it exists
+Sharding strategies and their tradeoffs
+Cross-shard writes and scatter-gather reads
+Fan-out on write vs read vs hybrid
+Embedded storage engines and key design
+Compression in storage systems
+Async replication and failure handling
+CAP theorem felt concretely, not theoretically
+Architecture
+┌─────────────────────────────────────────┐
+│           React Frontend (Vite)          │
+│   Feed View | Post View | Follow View   │
+└─────────────────┬───────────────────────┘
+                  │ HTTP/REST
+┌─────────────────▼───────────────────────┐
+│              Coordinator (Go)            │
+│  - Consistent hash ring                 │
+│  - Request routing                      │
+│  - Fan-out service                      │
+│  - Celebrity threshold logic            │
+│  - Heartbeat / failure detection        │
+└──────────┬──────────┬────────┬──────────┘
+           │          │        │
+     ┌─────▼──┐  ┌────▼───┐  ┌▼───────┐
+     │ Shard1 │  │ Shard2 │  │ Shard3 │
+     │  (Go)  │  │  (Go)  │  │  (Go)  │
+     │BadgerDB│  │BadgerDB│  │BadgerDB│
+     │ + zstd │  │ + zstd │  │ + zstd │
+     └─────┬──┘  └────┬───┘  └───┬────┘
+           │          │          │
+     ┌─────▼──┐  ┌────▼───┐  ┌──▼─────┐
+     │Replica1│  │Replica2│  │Replica3│
+     └────────┘  └────────┘  └────────┘
+Stack
+Layer	Technology	Why
+Backend	Go	New frontier, concurrency model fits fan-out perfectly
+Storage	BadgerDB	Embedded, pure Go, supports range scans
+Compression	zstd	Fast, high ratio, industry standard
+Transport	HTTP + JSON	Simple, debuggable, no extra learning overhead
+Orchestration	Docker Compose	Local multi-node cluster simulation
+Frontend	React + Vite	Minimal, just enough to demo
+Project Structure
+/cmd
+  /coordinator        ← coordinator entry point
+  /shard              ← shard node entry point
+/internal
+  /hash               ← consistent hash ring
+  /storage            ← BadgerDB wrapper + zstd
+  /fanout             ← fan-out logic (core)
+  /replication        ← primary-replica sync
+  /api                ← HTTP handlers
+  /models             ← shared data structs
+/frontend             ← React + Vite
+/docker-compose.yml
+/design.md            ← your design document
+Data Models
+go
+type User struct {
+    ID            string
+    Name          string
+    FollowerCount int
+}
+
+type Post struct {
+    ID        string
+    AuthorID  string
+    Content   string
+    Timestamp int64
+}
+
+type FeedEntry struct {
+    PostID    string
+    AuthorID  string
+    Timestamp int64
+}
+
+type Edge struct {
+    FollowerID string
+    FolloweeID string
+}
+Key Schema (BadgerDB)
+
+This is the most critical design decision. Keys are stored lexicographically — key design determines what range scans are possible.
+
+users:{user_id}                            → User (msgpack encoded, zstd compressed)
+posts:{post_id}                            → Post
+posts_by_author:{author_id}:{timestamp_padded}:{post_id}   → FeedEntry (author index)
+feed:{user_id}:{timestamp_padded}:{post_id} → FeedEntry
+graph:followers:{user_id}:{follower_id}    → Edge
+graph:following:{user_id}:{followee_id}    → Edge
+
+Why timestamp is zero-padded: lexicographic sort must match chronological sort. 0000000001718123456 sorts correctly. 1718123456 does not at variable lengths.
+
+Why the :{post_id} suffix on feed and author-index keys: two posts landing in the same timestamp slot would overwrite each other without it — silent post loss under tight seed loops. The suffix costs nothing and removes the failure class.
+
+Why the author index (posts_by_author): the celebrity read path needs "recent posts by author" as a single-shard range scan. posts:{post_id} keys hash across shards by post ID, so a scan cannot find one author's posts. See read-path step 4 below and the requirements doc (R3/R4).
+
+Why two edge directions: looking up "who follows user X" and "who does user X follow" are both O(scan) if you store both directions. Storing only one direction makes one of them O(full scan).
+
+Consistent Hash Ring
+
+Implement this yourself in /internal/hash. Do not use a library.
+
+go
+type Ring struct {
+    nodes       []uint32          // sorted virtual node hashes
+    nodeMap     map[uint32]string // virtual node hash → real node ID
+    virtualNodes int
+}
+
+func (r *Ring) AddNode(nodeID string)
+func (r *Ring) RemoveNode(nodeID string)
+func (r *Ring) GetNode(key string) string
+
+Virtual nodes: each physical node gets N virtual positions on the ring (e.g. N=150). Without virtual nodes, distribution is uneven. With them, each physical node owns roughly equal keyspace.
+
+GetNode logic: hash the key, find the first virtual node clockwise on the ring (binary search on sorted array), return its physical node.
+
+Fan-out Logic
+
+This is the core of the project. Lives in /internal/fanout.
+
+Write path (user creates a post)
+1. Store post on author's shard
+2. Check author's FollowerCount
+3. If FollowerCount < threshold (1000):
+     → Fan-out on write
+     → Fetch all follower IDs from graph:followers:{author_id}:*
+     → For each follower, write FeedEntry to feed:{follower_id}:{timestamp}
+     → Do this in parallel using goroutines
+     → If a shard is down, log failure, continue (partial fan-out)
+4. If FollowerCount >= threshold:
+     → Do nothing. Post is stored. No fan-out.
+Read path (user opens feed)
+1. Fetch precomputed feed entries from feed:{user_id}:* (range scan, latest N)
+2. Fetch list of followees from graph:following:{user_id}:*
+3. Filter followees where FollowerCount >= threshold (celebrities)
+4. For each celebrity, fetch their recent posts from posts_by_author:{celeb_id}:* (author index, single-shard range scan)
+5. Merge all entries by timestamp descending
+6. Return top N
+The merge problem
+
+Step 5 is a scatter-gather — you're fetching from potentially multiple shards simultaneously. Use goroutines, collect results into a channel, merge after all return.
+
+Replication
+
+Each shard has one replica. Kept simple intentionally.
+
+Write flow:
+
+Coordinator writes to primary shard
+Primary shard asynchronously replicates to its replica
+Coordinator does not wait for replica acknowledgment (async = eventual consistency)
+
+Failure detection:
+
+Coordinator pings each node every 5 seconds (heartbeat)
+If 3 consecutive pings fail, node marked as down
+If primary is down, coordinator routes reads to replica
+Writes to a down primary are queued in memory (small buffer), retried when primary recovers
+
+What this does not handle:
+
+Split brain (primary and replica both think they're primary)
+Data loss if primary dies before replicating
+These are Raft's job — acknowledge this explicitly
+HTTP API (Coordinator)
+POST   /users                    → create user
+GET    /users/{user_id}          → get user
+
+POST   /follow                   → follow a user
+       body: {follower, followee}
+DELETE /follow                   → unfollow
+
+POST   /posts                    → create post
+       body: {author_id, content}
+GET    /posts/{post_id}          → get post
+
+GET    /feed/{user_id}           → get feed (merged, sorted)
+GET    /feed/{user_id}?limit=N   → paginated
+
+GET    /health                   → coordinator health
+GET    /cluster                  → shard node statuses
+HTTP API (Shard nodes — internal)
+POST   /write        → write a key-value pair
+GET    /read         → read a key
+GET    /scan         → range scan between two keys
+DELETE /delete       → delete a key
+GET    /health       → node health + stats
+POST   /replicate    → receive replication payload from primary
+Docker Compose
+yaml
+services:
+  coordinator:
+    build: .
+    command: ["./app", "coordinator"]
+    ports: ["8080:8080"]
+    environment:
+      - SHARDS=shard1:8081,shard2:8082,shard3:8083
+      - CELEBRITY_THRESHOLD=1000
+
+  shard1:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=shard1
+      - PORT=8081
+      - REPLICA=replica1:8084
+    volumes: ["shard1-data:/data"]
+
+  shard2:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=shard2
+      - PORT=8082
+      - REPLICA=replica2:8085
+    volumes: ["shard2-data:/data"]
+
+  shard3:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=shard3
+      - PORT=8083
+      - REPLICA=replica3:8086
+    volumes: ["shard3-data:/data"]
+
+  replica1:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=replica1
+      - PORT=8084
+      - ROLE=replica
+    volumes: ["replica1-data:/data"]
+
+  replica2:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=replica2
+      - PORT=8085
+      - ROLE=replica
+    volumes: ["replica2-data:/data"]
+
+  replica3:
+    build: .
+    command: ["./app", "shard"]
+    environment:
+      - NODE_ID=replica3
+      - PORT=8086
+      - ROLE=replica
+    volumes: ["replica3-data:/data"]
+
+volumes:
+  shard1-data:
+  shard2-data:
+  shard3-data:
+  replica1-data:
+  replica2-data:
+  replica3-data:
+Frontend (React + Vite)
+
+Three views, nothing more:
+
+Feed View — default landing page
+
+Input: enter user ID
+Shows merged feed (posts from followees, celebrities included)
+Infinite scroll or simple pagination
+
+Post View
+
+Input: user ID + post content
+Submit → POST /posts
+Show success confirmation
+
+Follow View
+
+Input: follower ID + followee ID
+Follow / unfollow buttons
+Show current following list for a user
+
+No auth, no sessions, no state management library. Plain React useState + fetch.
+
+Known Gaps (document these, don't hide them)
+Gap	Production solution	Why skipped
+No consensus protocol	Raft for leader election	Too complex for scope
+Async replication = data loss possible	Synchronous replication + Raft	Tradeoff accepted for simplicity
+No Kafka	Fan-out via event queue	Adds infra, coordinator handles it directly
+No Redis feed cache	Redis as read-through cache	Time
+HTTP not gRPC	gRPC for shard communication	Learning overhead
+Celebrity threshold is static	Dynamic threshold based on load	Time
+No auth	JWT + middleware	Out of scope
+Single coordinator = SPOF	Multiple coordinators + load balancer	Acknowledged
+Design Document (write this on day 19)
+
+Structure it as:
+
+Problem — what you set out to solve
+Architecture — diagram + component descriptions
+Key decisions — why consistent hashing, why BadgerDB, why hybrid fan-out, where you set the threshold and why
+Tradeoffs — CAP position, consistency vs availability choices made
+What breaks at scale — honest assessment
+What you'd do differently — Raft, Kafka, Redis, gRPC
+
+This document is what you pull out in system design interviews. It shows you made deliberate decisions, not accidental ones.
+
+Build Order
+
+Phase 1 — Single node works
+Storage layer → data models → key schema → HTTP shard server → basic read/write/scan working locally
+
+Phase 2 — Cluster works
+Consistent hash ring → coordinator routing → Docker Compose → verify writes land on correct shards
+
+Phase 3 — Social graph works
+Follow/unfollow → graph storage → post creation → verify edges stored correctly
+
+Phase 4 — Fan-out works
+Fan-out on write for normal users → celebrity detection → fan-out on read → feed merge → end-to-end post → feed flow working
+
+Phase 5 — Resilience works
+Replication → heartbeat → failure detection → retry logic → verify system degrades gracefully not catastrophically
+
+Phase 6 — Polish
+API cleanup → CLI client → React frontend → seed data → design doc → README → demo
