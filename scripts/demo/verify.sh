@@ -4,7 +4,11 @@
 set -euo pipefail
 
 BASE="${1:-http://localhost:8080}"
-EXPECT_FOLLOWERS="${EXPECT_FOLLOWERS:-1000}"
+# Seed default is threshold+1 (1001): one lost follow increment would drop
+# celeb to 1000 and silently flip it out of the celebrity path, yet feeds
+# would still populate. Asserting the exact count catches both under-counts
+# and double-counts.
+EXPECT_FOLLOWERS="${EXPECT_FOLLOWERS:-1001}"
 FAIL=0
 
 # Feed entries "author|content" for a user, newest first.

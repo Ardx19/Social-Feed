@@ -1,6 +1,6 @@
 # Distributed Social Feed Engine — Design Document
 
-> The interview deliverable. Written interleaved with the build (R10): each section's "why" is captured while the reasoning is fresh, not backfilled at the end. This document is what you pull out in system design interviews — it shows deliberate decisions, not accidental ones.
+> Written interleaved with the build (R10): each section's "why" is captured while the reasoning is fresh, not backfilled at the end.
 
 **Status:** complete — 6 phases built and verified.
 
@@ -61,7 +61,7 @@ The keys:
 
 **Why MD5, not FNV:** FNV-1a's weak avalanche made sequential keys (`key0`…`key9999`) cluster — one node got ~67% of keys. MD5's strong diffusion spreads both key and node hashes evenly (~33/33/33 across 3 shards).
 
-**Static membership:** `RemoveNode` exists for API completeness but failure handling never calls it — re-hashing on failure would strand every key. Failure means failover to a replica, not ring mutation. This is a deliberate, interview-ready asymmetry: consistent hashing minimizes, not eliminates, the cost of membership change.
+**Static membership:** `RemoveNode` exists for API completeness but failure handling never calls it — re-hashing on failure would strand every key. Failure means failover to a replica, not ring mutation. This is a deliberate asymmetry: consistent hashing minimizes, not eliminates, the cost of membership change.
 
 **Routing by entity ID:** the coordinator's `ShardFor` hashes only the entity ID (user/author/follower), never a full storage key. This is what makes prefix scans work — `feed:{user}:*` must all live on one shard. Hashing a full key would scatter a range scan across the ring and break the read path.
 
@@ -85,7 +85,7 @@ The keys:
 
 **Hybrid fan-out with a static threshold.** `POST /posts` writes the post and its author-index entry to the author's shard in one transaction, then reads FollowerCount. Below the threshold (1000), it fans a denormalized `FeedEntry` out to every follower's shard, one batched write per shard. At/above the threshold it does nothing — the celebrity is served lazily on read. This bounds write amplification: normal posts are cheap to read (already in the feed), celebrity posts don't blast every follower's feed.
 
-**Denormalized content.** `FeedEntry` copies the post content into every follower's feed, so a feed renders in one range scan with no N+1 post fetches. The cost is storage amplification — the interview tradeoff. (The alternative, pointer-only entries, forces N post fetches per feed read.)
+**Denormalized content.** `FeedEntry` copies the post content into every follower's feed, so a feed renders in one range scan with no N+1 post fetches. The cost is storage amplification — the main tradeoff. (The alternative, pointer-only entries, forces N post fetches per feed read.)
 
 **Author index.** The celebrity read path needs "recent posts by author" as a single-shard scan, but `posts:{id}` hashes across shards by post ID. `posts_by_author:{author}:{ts}:{post}` makes it a range scan on the author's shard. This is the key that made the celebrity path bounded.
 

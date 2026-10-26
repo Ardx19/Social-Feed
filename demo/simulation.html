@@ -850,7 +850,7 @@ async function scenA() {
       '<div class="note">Every moved key on the ring moves TO the new shard; nothing reshuffles between old shards.</div>');
     await sleep(1200);
   });
-  await step('Failure is not membership change', 'In this system a dead shard is never removed from the ring. Re-hashing on failure would strand every key it owned (the data is on that shard and its replica). Failure means <b>failover to the replica</b>; the ring stays static. Scenario F shows it live.', 'deliberate, interview-ready asymmetry (design 3.2).', async () => {
+  await step('Failure is not membership change', 'In this system a dead shard is never removed from the ring. Re-hashing on failure would strand every key it owned (the data is on that shard and its replica). Failure means <b>failover to the replica</b>; the ring stays static. Scenario F shows it live.', 'a deliberate asymmetry (design 3.2).', async () => {
     setOut('<h3>Ring membership is static</h3><div class="note">RemoveNode exists in <span class="mono">internal/hash/ring.go</span> for completeness but failure handling never calls it.</div>');
   });
 }
@@ -1018,7 +1018,7 @@ async function scenF() {
     while (mon[V].down || wq.q.length) await sleep(400);
     await sleep(2500); inspSel = V;
   });
-  await step('Verify: what healed and what did not', `Everything is back on the primary. The queued edges exist, the node is green and the queue is empty. But ${x1}'s outage-time post is <b>not</b> in alice's feed: fan-out skipped her shard and nothing backfills it. That is the accepted gap.`, 'honest boundaries beat hand-waving in an interview (design 6).', async () => {
+  await step('Verify: what healed and what did not', `Everything is back on the primary. The queued edges exist, the node is green and the queue is empty. But ${x1}'s outage-time post is <b>not</b> in alice's feed: fan-out skipped her shard and nothing backfills it. That is the accepted gap.`, 'a documented, accepted gap (design 6).', async () => {
     const f = await api.feed('alice', 10);
     setOut(feedTable(f, 'GET /feed/alice (after recovery)') + `<div class="note">Queued edges present: <b>${N[V].store.has(followingKey(v2, x1)) && N[V].store.has(followingKey(v2, x2))}</b> &middot; write queue: <b>${wq.q.length}</b></div>`);
   });

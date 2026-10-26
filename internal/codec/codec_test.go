@@ -80,7 +80,7 @@ func TestSmallValueUsesRawFlag(t *testing.T) {
 
 func TestLargeValueUsesZstdFlag(t *testing.T) {
 	c := newCodec(t)
-	long := strings.Repeat("distributed systems interview prep ", 20) // ~560 bytes
+	long := strings.Repeat("distributed systems feed engine ", 20) // ~560 bytes
 	fe := models.FeedEntry{PostID: "p1", AuthorID: "alice", Content: long, Timestamp: 1}
 	data, err := c.Encode(&fe)
 	if err != nil {

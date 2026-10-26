@@ -19,7 +19,7 @@ import (
 )
 
 var base = flag.String("coordinator", "http://localhost:8080", "coordinator base URL")
-var followers = flag.Int("followers", 1000, "number of real followers for the celebrity")
+var followers = flag.Int("followers", 1001, "number of real followers for the celebrity (threshold + 1, so a single lost increment can't silently flip the celebrity path)")
 
 func main() {
 	flag.Parse()

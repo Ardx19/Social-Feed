@@ -1,12 +1,12 @@
 # Project Notes
 
-A step-by-step learning journal for the Distributed Social Feed Engine — maintained throughout the build. Each file covers one build phase: concepts as they land, decisions with their rejected alternatives, the code structure, gotchas, and how to narrate it in an interview.
+A step-by-step learning journal for the Distributed Social Feed Engine — maintained throughout the build. Each file covers one build phase: concepts as they land, decisions with their rejected alternatives, the code structure, gotchas, and key takeaways.
 
 **Companion documents**
 - `plan.txt` — the original execution blueprint
 - `docs/brainstorms/distributed-social-feed-engine-requirements.md` — the WHAT (requirements)
 - `docs/plans/2026-08-10-001-feat-distributed-feed-engine-plan.md` — the HOW (implementation plan)
-- `design.md` — the polished formal design document (primary interview deliverable, written in parallel)
+- `design.md` — the polished formal design document (written in parallel)
 
 ## Project in 10 lines
 
@@ -18,7 +18,7 @@ We're building a distributed system that solves the **fan-out problem**: when a 
 - A **coordinator** routes requests to the right shard using a **consistent hash ring** (hand-implemented, no library), so adding/removing machines moves only a fraction of keys.
 - Storage is **BadgerDB** (embedded, pure Go), with msgpack + zstd encoding and carefully-designed keys so range scans are efficient.
 - Each shard has a **replica** for async replication; a heartbeat detects failures and the coordinator fails reads over to replicas.
-- Accepted gaps (documented, not fixed): no consensus protocol (Raft), no event queue (Kafka), async replication can lose recent data, no auth. These are the "what I'd do differently" interview answers.
+- Accepted gaps (documented, not fixed): no consensus protocol (Raft), no event queue (Kafka), async replication can lose recent data, no auth. These are the "what I'd do differently" items.
 - The real deliverable is the ability to **defend every tradeoff** — that's what `design.md` and these notes build.
 
 ## Phase map
@@ -35,5 +35,4 @@ We're building a distributed system that solves the **fan-out problem**: when a 
 ## How to use these notes
 
 - Read in order (`01` → `06`) for the full journey, or jump to a phase file for a topic.
-- Each file ends with **Interview talking points** — practice narrating those.
 - Update the Status column here as phases complete.

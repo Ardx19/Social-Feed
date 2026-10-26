@@ -13,14 +13,14 @@ Build the distributed feed engine from `plan.txt` — Go coordinator with a self
 
 ## Problem Frame
 
-The fan-out problem: when a user posts, the post must reach every follower's feed. Eager fan-out is write-amplified and unbounded for celebrities; lazy fan-out makes reads expensive. Hybrid approaches are what production systems actually run. This project exists to make distributed systems concepts — consistent hashing, sharding, scatter-gather reads, fan-out strategies, CAP tradeoffs — concrete by building them, because the builder's primary goal is system design interview prep: the design doc and the ability to defend tradeoffs are the real deliverable, and working code is the evidence the reasoning was lived rather than memorized. The existing plan is thorough, but it is missing three decisions the code cannot be built without: how celebrity posts are found on read, whether users see their own posts, and which failure modes are acceptable.
+The fan-out problem: when a user posts, the post must reach every follower's feed. Eager fan-out is write-amplified and unbounded for celebrities; lazy fan-out makes reads expensive. Hybrid approaches are what production systems actually run. This project exists to make distributed systems concepts — consistent hashing, sharding, scatter-gather reads, fan-out strategies, CAP tradeoffs — concrete by building them, because the builder's primary goal is learning system design: the design doc and the ability to defend tradeoffs are the real deliverable, and working code is the evidence the reasoning was lived rather than memorized. The existing plan is thorough, but it is missing three decisions the code cannot be built without: how celebrity posts are found on read, whether users see their own posts, and which failure modes are acceptable.
 
 ---
 
 ## Actors
 
 - A1. Builder (the user): builds the system phase by phase, reviews code, learns the concepts.
-- A2. Interviewer (audience): reads the design doc; tradeoff reasoning and honest gap documentation are written for them.
+- A2. Reader (audience): reads the design doc; tradeoff reasoning and honest gap documentation are written for them.
 
 ---
 
@@ -68,7 +68,7 @@ The fan-out problem: when a user posts, the post must reach every follower's fee
 - R8. Cross-shard follow writes (follower edge, followee edge, follower count) are not atomic; partial failure may produce a half-edge. Documented with the production answers (two-phase commit, outbox pattern).
 - R9. All gaps in `plan.txt`'s known-gaps table remain gaps and are documented, not built: consensus protocol, synchronous replication, event queue, feed cache, gRPC, dynamic celebrity threshold, auth, multi-coordinator.
 
-**[Design doc — the interview deliverable]**
+**[Design doc]**
 - R10. The design doc is written interleaved with the build — each section as its concept is learned (key design after Phase 1, hashing and routing after Phase 2, fan-out after Phase 4, CAP and replication after Phase 5) — with final assembly, including "what breaks at scale" and "what you'd do differently", at the end.
 
 **[Demo]**
@@ -88,7 +88,7 @@ The fan-out problem: when a user posts, the post must reach every follower's fee
 
 ## Success Criteria
 
-- The builder can articulate, unprompted and in interview terms: why consistent hashing, why BadgerDB, why hybrid fan-out, where the threshold sits and why, the system's CAP position, and what breaks at scale.
+- The builder can articulate, unprompted: why consistent hashing, why BadgerDB, why hybrid fan-out, where the threshold sits and why, the system's CAP position, and what breaks at scale.
 - The design doc is complete and honest — every accepted gap named with its production answer.
 - All six phases complete; the end-to-end demo shows both fan-out modes; the feed merge is correct for celebrity and non-celebrity authors.
 - The decisions in this document are reflected in the built system without drift.
@@ -109,9 +109,9 @@ The fan-out problem: when a user posts, the post must reach every follower's fee
 
 - **Author index mirror write:** celebrity reads need a single-shard scan; the write-amplification cost is the standard tradeoff in real systems, and the key shape mirrors how production systems index posts by author.
 - **Self-follow with both edges on user creation:** own posts flow through existing paths with zero special cases; both edges are required because non-celebrities need the follower edge (fan-out delivers own feed) and celebrities need the following edge (read path picks self up).
-- **Accept partial fan-out and cross-shard follow gaps:** learning-project scope; each gap is a strong interview narrative (Kafka for fan-out, 2PC/outbox for multi-shard writes).
+- **Accept partial fan-out and cross-shard follow gaps:** learning-project scope; each gap has a known production answer (Kafka for fan-out, 2PC/outbox for multi-shard writes).
 - **Interleaved design doc:** the reasoning is fresh when written and compounds learning across phases; end-loaded writing (as planned) risks losing the "why" behind early decisions.
-- **Interview prep is the primary goal:** tradeoff reasoning and the design doc outrank polish, coverage completeness, and feature breadth.
+- **Learning is the primary goal:** tradeoff reasoning and the design doc outrank polish, coverage completeness, and feature breadth.
 
 ---
 

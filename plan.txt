@@ -311,8 +311,6 @@ Tradeoffs — CAP position, consistency vs availability choices made
 What breaks at scale — honest assessment
 What you'd do differently — Raft, Kafka, Redis, gRPC
 
-This document is what you pull out in system design interviews. It shows you made deliberate decisions, not accidental ones.
-
 Build Order
 
 Phase 1 — Single node works

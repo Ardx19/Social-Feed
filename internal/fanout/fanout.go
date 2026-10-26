@@ -66,10 +66,16 @@ func CreatePost(r Router, s Store, c *codec.Codec, author, content string, thres
 	count, err := readFollowerCount(s, c, authorAddr, author)
 	if err != nil {
 		// Count unreadable -> do not fan out (conservative); post still stored.
+		log.Printf("post %s by %s: follower count unreadable, stored without push", postID, author)
 		return postID, nil
 	}
 	if count >= threshold {
-		return postID, nil // celebrity: lazy delivery on read
+		// Celebrity: lazy delivery on read. The log line deliberately avoids
+		// the substring "fan-out" so demos can prove the absence of fan-out by
+		// grepping the coordinator log (scripts/demo/run.sh, Part B).
+		log.Printf("post %s by %s: celebrity lazy path (count %d >= threshold %d), no push",
+			postID, author, count, threshold)
+		return postID, nil
 	}
 
 	// 3. Fan out to followers, grouped by destination shard.
@@ -92,7 +98,9 @@ func CreatePost(r Router, s Store, c *codec.Codec, author, content string, thres
 
 	// One batched write per shard, in parallel; failures logged and skipped (R7).
 	var wg sync.WaitGroup
+	pushed := 0
 	for addr, pairs := range byShard {
+		pushed += len(pairs)
 		wg.Add(1)
 		go func(addr string, pairs []KV) {
 			defer wg.Done()
@@ -103,6 +111,7 @@ func CreatePost(r Router, s Store, c *codec.Codec, author, content string, thres
 		}(addr, pairs)
 	}
 	wg.Wait()
+	log.Printf("post %s by %s: fan-out pushed %d feed entries", postID, author, pushed)
 	return postID, nil
 }
 

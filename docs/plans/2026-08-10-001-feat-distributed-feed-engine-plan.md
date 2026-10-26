@@ -11,13 +11,13 @@ deepened: 2026-08-10
 
 ## Summary
 
-Build the distributed feed engine from `plan.txt` and the requirements doc: a Go coordinator with a hand-implemented consistent hash ring routing to 3 shard nodes (each with a replica), BadgerDB storage with msgpack + zstd encoding, hybrid fan-out with a static celebrity threshold, Docker Compose orchestration, and a React demo frontend — executed across six phases with design contracts the flow analysis surfaced: coordinator-stamped nanosecond timestamps with `:{post_id}` key suffixes, denormalized feed content, conditional count-bearing graph transactions, ordered replication, and an explicit coordinator↔shard error taxonomy. The design doc (the interview deliverable) is written interleaved with the phases.
+Build the distributed feed engine from `plan.txt` and the requirements doc: a Go coordinator with a hand-implemented consistent hash ring routing to 3 shard nodes (each with a replica), BadgerDB storage with msgpack + zstd encoding, hybrid fan-out with a static celebrity threshold, Docker Compose orchestration, and a React demo frontend — executed across six phases with design contracts the flow analysis surfaced: coordinator-stamped nanosecond timestamps with `:{post_id}` key suffixes, denormalized feed content, conditional count-bearing graph transactions, ordered replication, and an explicit coordinator↔shard error taxonomy. The design doc is written interleaved with the phases.
 
 ---
 
 ## Problem Frame
 
-A user's post must reach every follower's feed. Eager fan-out is write-amplified and unbounded for celebrities; lazy fan-out makes reads expensive; hybrid approaches are what production systems run. The builder's goal is system design interview prep (see origin: `docs/brainstorms/distributed-social-feed-engine-requirements.md`): the design doc and the ability to defend tradeoffs are the real deliverable, and working code is the evidence the reasoning was lived. The blueprint (`plan.txt`) is thorough but contains one hard contradiction with the requirements doc — its key schema has no author index, making the celebrity read path unimplementable — plus a set of unspecified contracts (timestamps, error semantics, replica mapping, feed content shape) that would surface as Phase-4/Phase-5 walls.
+A user's post must reach every follower's feed. Eager fan-out is write-amplified and unbounded for celebrities; lazy fan-out makes reads expensive; hybrid approaches are what production systems run. The builder's goal is learning system design (see origin: `docs/brainstorms/distributed-social-feed-engine-requirements.md`): the design doc and the ability to defend tradeoffs are the real deliverable, and working code is the evidence the reasoning was lived. The blueprint (`plan.txt`) is thorough but contains one hard contradiction with the requirements doc — its key schema has no author index, making the celebrity read path unimplementable — plus a set of unspecified contracts (timestamps, error semantics, replica mapping, feed content shape) that would surface as Phase-4/Phase-5 walls.
 
 ---
 
@@ -36,7 +36,7 @@ A user's post must reach every follower's feed. Eager fan-out is write-amplified
 - R11. Frontend has exactly three views; no auth, no state library (see origin: R11)
 - R12. Seed data includes at least one celebrity so both fan-out modes are demoable (see origin: R12)
 
-**Origin actors:** A1 (builder — learns concepts, reviews code), A2 (interviewer — reads design doc)
+**Origin actors:** A1 (builder — learns concepts, reviews code), A2 (reader — reads design doc)
 **Origin flows:** F1 (post creation / write path), F2 (feed read / read path), F3 (follow / unfollow)
 **Origin acceptance examples:** AE1 (self post in own feed, non-celebrity), AE2 (self post in own feed, celebrity, no fan-out writes), AE3 (celebrity post reaches follower via author index), AE4 (partial fan-out loss on down shard, no backfill)
 
@@ -80,14 +80,14 @@ A user's post must reach every follower's feed. Eager fan-out is write-amplified
 
 ## Key Technical Decisions
 
-- **Coordinator-stamped single nanosecond timestamp per post:** one `time.Now().UnixNano()` per post, zero-padded to 19 chars in keys, passed into every derived write (post, author index, all fan-out entries). Single source of truth — no cross-shard clock skew, and the merge compares comparable values. Precise phrasing for interviews: ordering among truly simultaneous posts is arbitrary-but-deterministic (Go serves POSTs concurrently; same-nanosecond ties sort by post ID — stable, not creation order — there is no corruption, just arbitrary tie order). Resolves the origin's deferred timestamp question
+- **Coordinator-stamped single nanosecond timestamp per post:** one `time.Now().UnixNano()` per post, zero-padded to 19 chars in keys, passed into every derived write (post, author index, all fan-out entries). Single source of truth — no cross-shard clock skew, and the merge compares comparable values. Precise phrasing: ordering among truly simultaneous posts is arbitrary-but-deterministic (Go serves POSTs concurrently; same-nanosecond ties sort by post ID — stable, not creation order — there is no corruption, just arbitrary tie order). Resolves the origin's deferred timestamp question
 - **Fixed-width post IDs:** post IDs are `crypto/rand` hex of a fixed byte count — the identical insight to zero-padded timestamps: within a timestamp slot, keys sort by post ID, so variable-length IDs would interleave wrong. Stated as a sibling invariant to the timestamp rule
 - **`:{post_id}` suffix on feed and author-index keys** (`feed:{user}:{ts19}:{post_id}`, `posts_by_author:{author}:{ts19}:{post_id}`): two posts landing in the same timestamp slot (tight seed loops) overwrite each other without the suffix — silent post loss. The suffix costs nothing and removes the failure class; scans return (ts, post_id) order
-- **Denormalized feed content:** `FeedEntry{PostID, AuthorID, Timestamp, Content}` — one range scan renders the feed; celebrity-path `Post`s and fan-out-path entries merge into one shape. Storage amplification is the interview tradeoff (plan.txt's pointer-only entries would force N+1 post fetches per feed read)
+- **Denormalized feed content:** `FeedEntry{PostID, AuthorID, Timestamp, Content}` — one range scan renders the feed; celebrity-path `Post`s and fan-out-path entries merge into one shape. Storage amplification is the tradeoff (plan.txt's pointer-only entries would force N+1 post fetches per feed read)
 - **Routing by entity ID, never the full key:** coordinator hashes `author_id`/`user_id`/`follower_id` only. Author-index keys must route by `hash(author_id)` so they live on the author's shard with the post — otherwise the R4 single-shard scan guarantee silently breaks
 - **Ring membership is static:** `RemoveNode` exists in the ring API (per plan.txt) but failure handling never calls it — re-hashing would strand every key. Failure → failover to replica
 - **Self-follow semantics:** both self-edges + the user record are written in one shard-local BadgerDB transaction at user creation; self-follow does **not** increment FollowerCount (users are born at 0; celebrities cross at exactly 1000 real followers). Unfollow-self is rejected with 400 — allowing it would permanently darken a celebrity's own feed
-- **Conditional count-bearing graph transaction** (lives in the storage package, not the API handler — codec isolation): `follow(A,B)` performs the B-side writes through `storage.AddFollower`, which checks the follower edge, writes it, and increments FollowerCount in ONE shard-local transaction, retried on `badger.ErrConflict` (BadgerDB uses optimistic concurrency; `db.Update` does not retry, so the storage method must). The HTTP handler is a thin call into it. Invariant: FollowerCount always equals the number of real follower edges (excluding the self-edge) — the count is the celebrity gate, so it must mean exactly what it says. Duplicate follows are idempotent no-ops; unfollow is conditional the other way. A generic increment endpoint cannot back this (edge + count as two transactions can drift between them). A-side edge writes need no ceremony — no count rides on them. Accepted contention: every follow of a celebrity conflicts with every other (one hot user record), serialized by retry — fine at this scale; a separate count key is the future decoupling (interview answer, see design.md)
+- **Conditional count-bearing graph transaction** (lives in the storage package, not the API handler — codec isolation): `follow(A,B)` performs the B-side writes through `storage.AddFollower`, which checks the follower edge, writes it, and increments FollowerCount in ONE shard-local transaction, retried on `badger.ErrConflict` (BadgerDB uses optimistic concurrency; `db.Update` does not retry, so the storage method must). The HTTP handler is a thin call into it. Invariant: FollowerCount always equals the number of real follower edges (excluding the self-edge) — the count is the celebrity gate, so it must mean exactly what it says. Duplicate follows are idempotent no-ops; unfollow is conditional the other way. A generic increment endpoint cannot back this (edge + count as two transactions can drift between them). A-side edge writes need no ceremony — no count rides on them. Accepted contention: every follow of a celebrity conflicts with every other (one hot user record), serialized by retry — fine at this scale; a separate count key is the future decoupling (see design.md)
 - **Batched fan-out per destination shard:** followers grouped by shard; one HTTP call per shard carrying final key→value pairs, short per-call deadline. Avoids 1000 concurrent requests to one shard and stalls on hung shards. On the shard, a batched write applies as ONE BadgerDB transaction — all-or-nothing per shard, matching the log-and-skip-per-shard failure model. Watch `badger.ErrTxnTooBig` only if the celebrity threshold ever rises well past 1000. Post success is returned once the post + author index are durably stored — fan-out outcome is observability, not the response
 - **Error taxonomy (coordinator ↔ shard contract):** shard responses distinguish `missing` (200 with null/empty) from `shard-error` (5xx) from `down` (connection failure). Coordinator behavior per case: feed scan on shard-error → retry once via replica → else 502; celebrity fetch failure → skip that celebrity, merge the rest; fan-out write failure → log + skip (R7); any read error in the undetected-death window → one retry via replica. A fresh user's first feed read must return `200 []`, never 500
 - **Write queue semantics:** bounded in-memory queue in the coordinator storing final key→value pairs (idempotent replay by construction). Eligibility is the contract: only writes whose KV pairs can be materialized offline without reading the down shard — A-side follow edges, unfollows, deletes. **Post creation is never queued** — the celebrity gate and fan-out pairs live on the down shard, so a queued post would drain silently missing its fan-out; posts to a down author's shard return 502. Overflow → 503, never silent drop; coordinator restart loses the queue — documented in `design.md`
@@ -97,7 +97,7 @@ A user's post must reach every follower's feed. Eager fan-out is write-amplified
 - **Deterministic merge + logical cursor:** sort by `(timestamp, post_id)`, dedupe by `post_id` (kills the threshold-crossing duplicate artifact). Pagination cursor is the logical `(ts19, post_id)` position, not a physical key — the merged page spans `feed:{user}:*` and celebrity `posts_by_author:*` on different shards, so each scan reconstructs its own prefix's seek key from the tuple and iterates backward with BadgerDB's seek-then-reset-prefix pattern
 - **ID validation at the coordinator:** reject `:` and control characters in user IDs (a user named `bob` would lexicographically prefix-scan `bob:x`'s data — cross-user leakage), cap length at 64 chars. `POST /users` on an existing ID → 409, no overwrite (resetting FollowerCount would flip celebrity status; also keeps seed idempotency)
 - **Celebrity check is O(following) live reads per feed load:** every followee's FollowerCount is read on each feed read (parallel). The tempting optimization — caching the celebrity flag in the following edge at follow time — is wrong: celebrity status changes after you follow, so the flag goes stale and the read path silently takes the wrong branch. Live reads are correct; the cost is deliberate and documented in design.md
-- **Compression measured, not assumed:** zstd frames carry ~10+ bytes of overhead, so compressing tiny values (an Edge is two IDs; a FeedEntry is small) can inflate them. Decision at implementation: either skip compression below N bytes with a 1-byte raw/compressed flag, or compress everything and record the measured cost in design.md. Either is defensible — silently compressing 20-byte values is the one an interviewer catches
+- **Compression measured, not assumed:** zstd frames carry ~10+ bytes of overhead, so compressing tiny values (an Edge is two IDs; a FeedEntry is small) can inflate them. Decision at implementation: either skip compression below N bytes with a 1-byte raw/compressed flag, or compress everything and record the measured cost in design.md. Either is defensible — silently compressing 20-byte values is the indefensible choice
 - **Latest-N reads via reverse iterator:** no pruning machinery; feed and author-index scans take the newest N entries directly
 
 ---
@@ -151,7 +151,7 @@ A user's post must reach every follower's feed. Eager fan-out is write-amplified
 │   └── demo/                      # demo + resilience verification scripts
 ├── Dockerfile                     # single binary `./app` for all 7 services
 ├── docker-compose.yml             # coordinator + shard1-3 + replica1-3
-├── design.md                      # the interview deliverable (written per-unit)
+├── design.md                      # the design document (written per-unit)
 ├── docs/notes/                     # per-unit learning journal (README index + 01..06 phase files)
 ├── go.mod                          # module `socialfeed`
 ├── plan.txt                       # amended in U1 (key schema + read-path step 4)
@@ -497,7 +497,7 @@ flowchart TB
 - `/replicate` payloads are absolute final values only — never operations (increment replay would double-apply; the primary sends the final computed value). A payload carries one transaction's full write-set (see unit-of-work contract above)
 - Deletes replicate too; each payload applies on the replica as one transaction (the replica side of the one-txn→one-op→one-txn contract)
 - Replica is a full independent BadgerDB instance; no catch-up/backlog on missed replication — accepted gap (R9), documented in `design.md`
-- `design.md`: replication section — write the CAP position and the "replica serves stale reads" talking point (R10)
+- `design.md`: replication section — write the CAP position and the "replica serves stale reads" note (R10)
 
 **Test scenarios:**
 - Happy path: write to primary → payload arrives at the replica with identical key→value bytes (final value, not op)
@@ -599,7 +599,7 @@ flowchart TB
 - Space seeded posts beyond the timestamp granularity and verify distinct post IDs in feeds (the `:{post_id}` suffix protects anyway)
 - Verification script asserts: both fan-out modes observable (fan-out log lines for normal posts, none for celebrity), celebrity crossing at exactly 1000 real followers, own-posts-in-feed for both a normal user and the celebrity (AE1, AE2), follower sees celebrity post with zero fan-out (AE3), and a resilience run (AE4 + U10 drill)
 - `README.md`: runbook — prerequisites, up, seed, demo script, resilience drill
-- `design.md` final assembly (R10): the interview-ready document per plan.txt's day-19 structure, written fresh against the build
+- `design.md` final assembly (R10): the final document per plan.txt's day-19 structure, written fresh against the build
 
 **Test scenarios:**
 - Happy path: seed completes; every seeded user's feed is non-empty and correctly ordered
@@ -612,9 +612,9 @@ flowchart TB
 
 ---
 
-### U13. Design doc review pass (interview readiness)
+### U13. Design doc review pass (final review)
 
-**Goal:** A final pass over `design.md` for interview readiness — the real deliverable (see origin: Problem Frame, A2).
+**Goal:** A final pass over `design.md` for completeness — the real deliverable (see origin: Problem Frame, A2).
 
 **Requirements:** R9 (gaps documented), R10
 
@@ -624,14 +624,14 @@ flowchart TB
 - Modify: `design.md`
 
 **Approach:**
-- Read `design.md` as the interviewer would: every key decision must have a why, every accepted gap a production answer, every claim a "what breaks at scale" consequence
+- Read `design.md` as a reviewer would: every key decision must have a why, every accepted gap a production answer, every claim a "what breaks at scale" consequence
 - Verify the sections from plan.txt's design-doc structure are all present: problem, architecture, key decisions (hashing, BadgerDB, hybrid fan-out, threshold placement), tradeoffs (CAP position, consistency vs availability), what breaks at scale, what you'd do differently (Raft, Kafka, Redis, gRPC)
-- Dry-run the threshold-crossing and failover narratives aloud — the Phase 4 / Phase 5 demo stories (crossing 999→1000 both directions; the 15s detection window; stale replica reads; post-loss during outage as the Kafka story)
+- Walk through the threshold-crossing and failover scenarios — the Phase 4 / Phase 5 demo stories (crossing 999→1000 both directions; the 15s detection window; stale replica reads; post-loss during outage as the Kafka story)
 
 **Test scenarios:**
 - Test expectation: none — document review; verification is the checklist below
 
-**Verification:** Every section of the plan.txt design-doc structure is present and non-empty; a reviewer (the user, or a practice interview partner) can extract the threshold and failover narratives from the document alone.
+**Verification:** Every section of the plan.txt design-doc structure is present and non-empty; a reviewer can extract the threshold and failover behavior from the document alone.
 
 ---
 
@@ -663,8 +663,8 @@ flowchart TB
 
 ## Documentation / Operational Notes
 
-- `design.md` is the interview deliverable and is written continuously (U1–U12) — it must never be backfilled at the end
-- `docs/notes/` is the step-by-step learning journal maintained per-unit during execution — one file per phase (indexed via `docs/notes/README.md`), capturing concepts, decisions, gotchas, and interview talking points as work lands. Complements `design.md` (depth) with quick comprehension
+- `design.md` is the primary deliverable and is written continuously (U1–U12) — it must never be backfilled at the end
+- `docs/notes/` is the step-by-step learning journal maintained per-unit during execution — one file per phase (indexed via `docs/notes/README.md`), capturing concepts, decisions, and gotchas as work lands. Complements `design.md` (depth) with quick comprehension
 - `plan.txt` stays the blueprint; it is amended once in U1 (key schema + read-path step 4) to remove the R3/R4 contradiction
 - `README.md` (U12) carries the runbook: prerequisites, up, seed, demo, resilience drill
 - No monitoring or operational tooling — a learning project; `/health`, `/cluster`, and coordinator fan-out logs are the observability surface
