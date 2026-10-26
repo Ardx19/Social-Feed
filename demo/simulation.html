@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Distributed Feed Engine - Simulation</title>
+<style>
+:root{
+  --bg:#0b1020; --panel:#121a31; --panel2:#18223f; --line:#2a3860; --text:#e6ecff; --mut:#8fa0c8;
+  --acc:#6aa7ff; --ok:#3ddc97; --warn:#ffcf5c; --bad:#ff5c7a; --pur:#b78cff;
+  --s1:#6aa7ff; --s2:#3ddc97; --s3:#ffb35c;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding:12px 16px 40px}
+h1{font-size:18px;margin:0}
+h1 small{font-weight:400;color:var(--mut);margin-left:8px;font-size:13px}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:10px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+button,select,input{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:5px 10px}
+button{cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);color:#04101f;border-color:var(--acc);font-weight:600}
+button.go{background:var(--ok);color:#03150d;border-color:var(--ok);font-weight:600}
+button.bad{border-color:var(--bad);color:var(--bad)}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.controls label{color:var(--mut);font-size:12px}
+input[type=range]{padding:0;width:120px;accent-color:var(--acc)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.panel h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 8px;font-weight:600}
+.main{display:grid;grid-template-columns:minmax(0,1fr) 410px;gap:12px;margin-bottom:12px}
+.bottom{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:12px}
+@media(max-width:1150px){.main,.bottom{grid-template-columns:minmax(0,1fr)}}
+#narr{display:flex;gap:14px;align-items:flex-start;margin-bottom:10px;min-height:92px}
+#stepno{flex:none;background:var(--acc);color:#04101f;border-radius:8px;padding:6px 10px;font-weight:700;font-size:13px;min-width:62px;text-align:center}
+#title{font-size:16px;font-weight:700;margin-bottom:2px}
+#text{color:var(--text)}
+#why{color:var(--warn);font-size:13px;margin-top:4px}
+#sub{color:var(--ok);font-size:13px;margin-top:4px;min-height:18px;font-family:ui-monospace,Consolas,monospace}
+svg{display:block;width:100%;height:auto}
+#diagram text{font-family:ui-monospace,Consolas,monospace}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--mut);font-size:12px;margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+#log{height:300px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace}
+#log div{border-bottom:1px solid #1d2745;padding:1px 0;word-break:break-word}
+#log .t{color:#5d6d99;margin-right:6px}
+.k-req{color:#9ec3ff}.k-ok{color:var(--ok)}.k-err{color:var(--bad)}.k-warn{color:var(--warn)}.k-info{color:var(--text)}.k-repl{color:var(--pur)}.k-hb{color:#7d8bb3}.k-sys{color:#7fe3ff}
+#metrics{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:13px}
+#metrics div{display:flex;justify-content:space-between;border-bottom:1px dotted #26335a}
+#metrics b{font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chips button{padding:3px 9px;font-size:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:3px 8px;border-bottom:1px solid #202c52;vertical-align:top}
+th{color:var(--mut);font-weight:600}
+td.m,.mono{font-family:ui-monospace,Consolas,monospace}
+#insp-rows{max-height:330px;overflow:auto}
+.new{background:rgba(255,207,92,.14)}
+.badge{display:inline-block;border-radius:5px;padding:0 6px;font-size:11px;font-weight:600}
+.b-fan{background:#12402e;color:var(--ok)}.b-cel{background:#47310f;color:var(--s3)}.b-both{background:#3a2a5e;color:var(--pur)}
+.bar{height:14px;border-radius:4px;background:#22305a;position:relative;overflow:hidden;min-width:60px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+#out h3{margin:8px 0 4px;font-size:14px}
+#out .note{color:var(--mut);font-size:12.5px;margin:4px 0}
+#out .big{font-size:22px;font-weight:700}
+.row{display:flex;gap:12px;align-items:center;margin:3px 0}
+.row .lab{width:90px;flex:none;color:var(--mut);font-size:12.5px}
+.row .bar{flex:1}
+.row .val{width:150px;flex:none;font-size:12.5px;text-align:right}
+#play{display:none;margin-top:10px}
+#play.show{display:block}
+#play .f{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0}
+#play input{width:100px}
+#play input.wide{width:200px}
+.kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Distributed Feed Engine<small>live simulation of the coordinator, 3 shards and 3 replicas</small></h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<div class="controls panel" style="margin-bottom:10px">
+  <button id="bPlay" class="go">Play</button>
+  <button id="bPause">Pause</button>
+  <button id="bStep">Step</button>
+  <button id="bRestart">Restart scenario</button>
+  <label>speed <input id="speed" type="range" min="-2" max="2" step="0.25" value="0"> <span id="speedv">1x</span></label>
+  <label>replication lag <input id="lag" type="range" min="0" max="3000" step="50" value="400"> <span id="lagv">400 ms</span></label>
+  <span class="kbd">space</span><span style="color:var(--mut);font-size:12px">play/pause</span>
+  <span class="kbd">&rarr;</span><span style="color:var(--mut);font-size:12px">step</span>
+  <span id="clock" class="mono" style="margin-left:auto;color:var(--mut)">t=0.0s</span>
+</div>
+
+<div class="main">
+  <div class="panel">
+    <div id="narr">
+      <div id="stepno">-</div>
+      <div style="min-width:0">
+        <div id="title">Pick a scenario</div>
+        <div id="text"></div>
+        <div id="why"></div>
+        <div id="sub"></div>
+      </div>
+    </div>
+    <svg id="diagram" viewBox="0 0 1000 590" role="img" aria-label="Cluster diagram"></svg>
+    <div class="legend">
+      <span><i style="background:#6aa7ff"></i>client request</span>
+      <span><i style="background:#ffd166"></i>coordinator to shard RPC</span>
+      <span><i style="background:#8aa0d0"></i>response</span>
+      <span><i style="background:#b78cff"></i>async replication</span>
+      <span><i style="background:#ff9f43"></i>queued-write replay</span>
+      <span><i style="background:#5b6b94"></i>heartbeat</span>
+      <span><i style="background:#ff5c7a"></i>failed / timed out</span>
+    </div>
+    <div id="play" class="panel">
+      <h2>Free play - drive the cluster yourself</h2>
+      <div class="f"><button data-a="seed">Seed small graph</button><button data-a="celeb">Add celebrity (1001 followers)</button><button data-a="cluster">GET /cluster</button></div>
+      <div class="f">POST /users <input id="pu" placeholder="id" value="zoe"> <button data-a="user">create</button>
+        &nbsp; follow <input id="pf" placeholder="follower" value="zoe"> &rarr; <input id="pe" placeholder="followee" value="alice"> <button data-a="follow">follow</button> <button data-a="unfollow">unfollow</button></div>
+      <div class="f">POST /posts as <input id="pa" value="alice"> <input class="wide" id="pc" value="hello from the simulator"> <button data-a="post">post</button></div>
+      <div class="f">GET /feed/ <input id="pv" value="bob"> limit <input id="pl" style="width:50px" value="10"> before <input id="pb" class="wide" placeholder="cursor (optional)"> <button data-a="feed">load feed</button></div>
+      <div class="f">node <select id="pn"></select> <button data-a="kill" class="bad">kill process</button> <button data-a="restart">restart</button> queue cap <input id="pq" style="width:60px" value="1024"> <button data-a="cap">set</button></div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="panel"><h2>Consistent hash ring (150 virtual nodes per shard)</h2>
+      <svg id="ring" viewBox="0 0 400 400"></svg>
+      <div id="rinfo" class="mono" style="font-size:12px;color:var(--mut)"></div>
+    </div>
+    <div class="panel"><h2>Metrics</h2><div id="metrics"></div></div>
+    <div class="panel"><h2>Event log</h2><div id="log"></div></div>
+  </div>
+</div>
+
+<div class="bottom">
+  <div class="panel"><h2>Scenario output</h2><div id="out"><span style="color:var(--mut)">Results of requests and computed comparisons appear here.</span></div></div>
+  <div class="panel"><h2>Storage inspector (BadgerDB keys, in lexicographic order)</h2>
+    <div class="chips" id="chips"></div>
+    <div style="margin-bottom:6px">filter <input id="filt" placeholder="key prefix, e.g. feed:bob" style="width:240px"> <span id="icount" style="color:var(--mut);font-size:12px"></span></div>
+    <div id="insp-rows"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================
+   utilities
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const short = (k, n = 34) => k.length > n ? k.slice(0, Math.ceil(n/2) - 1) + '...' + k.slice(-(Math.floor(n/2) - 2)) : k;
+const SHARDS = ['shard1','shard2','shard3'];
+const REPLICAS = ['replica1','replica2','replica3'];
+const ALL = [...SHARDS, ...REPLICAS];
+const replicaOf = s => 'replica' + s.slice(5);
+const COL = {shard1:'#6aa7ff', shard2:'#3ddc97', shard3:'#ffb35c'};
+const colorOf = id => id.startsWith('replica') ? '#b78cff' : (COL[id] || '#8fa0c8');
+const colorShard = id => COL[id.startsWith('replica') ? 'shard' + id.slice(7) : id] || '#8fa0c8';
+const THRESHOLD = 1000;
+const HB_INTERVAL = 5000, HB_MISSES = 3;
+
+/* ============================================================
+   MD5 (the Go ring hashes with md5; first 4 bytes big-endian)
+   ============================================================ */
+const MD5K = Array.from({length:64}, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0);
+const MD5S = [7,12,17,22,5,9,14,20,4,11,16,23,6,10,15,21];
+function md5(str) {
+  const bytes = new TextEncoder().encode(str), n = bytes.length;
+  const total = (((n + 8) >> 6) + 1) << 6;
+  const buf = new Uint8Array(total); buf.set(bytes); buf[n] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(total - 8, (n * 8) >>> 0, true);
+  dv.setUint32(total - 4, Math.floor(n * 8 / 4294967296), true);
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let o = 0; o < total; o += 64) {
+    const M = []; for (let i = 0; i < 16; i++) M[i] = dv.getUint32(o + i * 4, true);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      F = (F + A + MD5K[i] + M[g]) >>> 0;
+      A = D; D = C; C = B;
+      const s = MD5S[(i >> 4) * 4 + (i % 4)];
+      B = (B + ((F << s) | (F >>> (32 - s)))) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+  }
+  const out = new Uint8Array(16), ov = new DataView(out.buffer);
+  ov.setUint32(0, a0, true); ov.setUint32(4, b0, true); ov.setUint32(8, c0, true); ov.setUint32(12, d0, true);
+  return out;
+}
+const md5hex = s => Array.from(md5(s), b => b.toString(16).padStart(2, '0')).join('');
+function h32(s) { const m = md5(s); return ((m[0] << 24) | (m[1] << 16) | (m[2] << 8) | m[3]) >>> 0; }
+function fnv32(s) { let h = 0x811c9dc5; for (const b of new TextEncoder().encode(s)) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; }
+
+/* ============================================================
+   consistent hash ring - mirrors internal/hash/ring.go
+   ============================================================ */
+class Ring {
+  constructor(v, hf = h32) { this.v = v; this.hf = hf; this.pos = []; this.map = new Map(); }
+  add(id) {
+    for (let i = 0; i < this.v; i++) {
+      const p = this.hf(id + '#' + i);
+      if (this.map.has(p)) continue;
+      this.map.set(p, id); this.pos.push(p);
+    }
+    this.pos.sort((a, b) => a - b);
+  }
+  get(key) {
+    const h = this.hf(key);
+    let lo = 0, hi = this.pos.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (this.pos[m] >= h) hi = m; else lo = m + 1; }
+    if (lo === this.pos.length) lo = 0;
+    return {node: this.map.get(this.pos[lo]), hash: h, vpos: this.pos[lo]};
+  }
+  shares() {
+    const out = {}; const n = this.pos.length; const R = 4294967296;
+    for (let i = 0; i < n; i++) {
+      const prev = i === 0 ? this.pos[n - 1] - R : this.pos[i - 1];
+      const id = this.map.get(this.pos[i]);
+      out[id] = (out[id] || 0) + (this.pos[i] - prev) / R;
+    }
+    return out;
+  }
+}
+function buildRing(ids, hf) { const r = new Ring(150, hf); [...ids].sort().forEach(i => r.add(i)); return r; }
+
+/* ============================================================
+   key schema - mirrors internal/keys/keys.go
+   ============================================================ */
+const userKey = id => 'users:' + id;
+const postKey = id => 'posts:' + id;
+const authorPrefix = a => 'posts_by_author:' + a + ':';
+const authorKey = (a, ts, id) => authorPrefix(a) + ts + ':' + id;
+const feedPrefix = u => 'feed:' + u + ':';
+const feedKey = (u, ts, id) => feedPrefix(u) + ts + ':' + id;
+const followersPrefix = u => 'graph:followers:' + u + ':';
+const followersKey = (u, f) => followersPrefix(u) + f;
+const followingPrefix = u => 'graph:following:' + u + ':';
+const followingKey = (u, e) => followingPrefix(u) + e;
+const lastSeg = k => k.slice(k.lastIndexOf(':') + 1);
+let seq = 0n;
+function nowTs() { return String(1750000000000000000n + BigInt(Math.floor(T.vt)) * 1000000n + (seq++)).padStart(19, '0'); }
+function newId() { let s = ''; for (let i = 0; i < 24; i++) s += Math.floor(Math.random() * 16).toString(16); return s; }
+function parseCursor(s) { if (!s) return null; const i = s.indexOf(':'); return i < 0 ? null : {ts: s.slice(0, i), id: s.slice(i + 1)}; }
+const relTime = ts => { const ms = Number((BigInt(ts) - 1750000000000000000n) / 1000000n); return 't+' + (ms / 1000).toFixed(1) + 's'; };
+
+/* ============================================================
+   virtual clock + scheduler (everything is driven by this)
+   ============================================================ */
+const T = {vt: 0, frozen: true, speed: 1, timers: [], last: performance.now(), stepMode: true, waiter: null};
+const Q = {quiet: false};
+function after(ms, fn) { T.timers.push({at: T.vt + ms, fn}); }
+function sleep(ms) { return Q.quiet ? Promise.resolve() : new Promise(r => after(ms, r)); }
+function runTimers() {
+  let again = true;
+  while (again) {
+    again = false;
+    T.timers.sort((a, b) => a.at - b.at);
+    while (T.timers.length && T.timers[0].at <= T.vt) { T.timers.shift().fn(); again = true; }
+  }
+}
+
+/* packets */
+const POS = {client:[85,75], coord:[500,75], shard1:[210,300], shard2:[500,300], shard3:[790,300], replica1:[210,500], replica2:[500,500], replica3:[790,500]};
+const NW = 170, NH = 96;
+const ROUTES = {};
+(function buildRoutes() {
+  ROUTES['client>coord'] = [[140,75],[400,75]];
+  SHARDS.forEach((s, i) => {
+    const [x] = POS[s];
+    ROUTES['coord>' + s] = [[500,130],[x,252]];
+    ROUTES[s + '>' + REPLICAS[i]] = [[x,348],[x,452]];
+    ROUTES['coord>' + REPLICAS[i]] = [[500,130],[x + 110,215],[x + 110,500],[x + 85,500]];
+  });
+})();
+function pathFor(a, b) {
+  if (ROUTES[a + '>' + b]) return ROUTES[a + '>' + b];
+  if (ROUTES[b + '>' + a]) return ROUTES[b + '>' + a].slice().reverse();
+  return [POS[a], POS[b]];
+}
+function along(pts, u) {
+  const L = []; let tot = 0;
+  for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]); L.push(d); tot += d; }
+  let t = Math.max(0, Math.min(1, u)) * tot;
+  for (let i = 0; i < L.length; i++) {
+    if (t <= L[i] || i === L.length - 1) { const f = L[i] ? t / L[i] : 0; return [pts[i][0] + (pts[i+1][0] - pts[i][0]) * f, pts[i][1] + (pts[i+1][1] - pts[i][1]) * f]; }
+    t -= L[i];
+  }
+  return pts[0];
+}
+const PK = {list: []};
+const PKCOL = {req:'#6aa7ff', ok:'#3ddc97', err:'#ff5c7a', rpc:'#ffd166', resp:'#8aa0d0', repl:'#b78cff', hb:'#5b6b94', queue:'#ff9f43', fail:'#ff5c7a'};
+function pkt(from, to, o = {}) {
+  if (Q.quiet) return Promise.resolve();
+  return new Promise(res => PK.list.push({from, to, kind: o.kind || 'rpc', label: o.label || '', dur: o.dur || (o.fail ? 1400 : 650), fail: !!o.fail, t0: T.vt, res}));
+}
+function stepPackets() {
+  const done = PK.list.filter(p => T.vt >= p.t0 + p.dur);
+  if (done.length) { PK.list = PK.list.filter(p => !done.includes(p)); done.forEach(p => p.res()); }
+}
+
+/* ============================================================
+   cluster state
+   ============================================================ */
+let N = {}, mon = {}, repl = {}, wq = {q: [], cap: 1024}, M = {}, markers = [], LOG = [], coordLast = null, coordFlash = -9e9, cfg = {lag: 400};
+class HttpErr extends Error { constructor(code, msg) { super(msg); this.code = code; } }
+class NetErr extends Error { constructor(node) { super('unreachable ' + node); this.node = node; } }
+
+function resetMetrics() { M = {req: {}, writes: 0, pushed: 0, skipped: 0, replSent: 0, replDropped: 0, replLost: 0, reads: 0}; }
+function resetCluster() {
+  T.timers = []; T.vt = 0; PK.list = []; markers = []; LOG = []; coordLast = null;
+  N = {}; mon = {}; repl = {};
+  ALL.forEach(id => {
+    N[id] = {id, kind: id.startsWith('replica') ? 'replica' : 'primary', replica: id.startsWith('shard') ? replicaOf(id) : null,
+             up: true, store: new Map(), kf: new Map(), flash: -9e9};
+    mon[id] = {misses: 0, down: false};
+  });
+  SHARDS.forEach(s => repl[s] = {q: [], busy: false, cap: 4096});
+  wq = {q: [], cap: 1024};
+  RING = buildRing(SHARDS);
+  resetMetrics(); renderLog(true); setOut('');
+  after(HB_INTERVAL, hbLoop);
+  $('#pq').value = 1024;
+}
+let RING = buildRing(SHARDS);
+
+function log(kind, msg) {
+  if (Q.quiet) return;
+  LOG.push({kind, msg, t: T.vt}); if (LOG.length > 400) LOG.shift(); logDirty = true;
+}
+
+/* routing - hashes the ENTITY ID only (design.md 3.2) */
+function route(entityId, opts = {}) {
+  const r = RING.get(entityId);
+  if (!Q.quiet && opts.mark !== false) { markers.push({key: entityId, hash: r.hash, vpos: r.vpos, node: r.node, t0: T.vt}); if (markers.length > 14) markers.shift(); }
+  return r.node;
+}
+const readTarget = shard => (mon[shard].down ? replicaOf(shard) : shard);
+
+/* storage primitives */
+function commit(n, pairs, deletes = []) {
+  for (const [k, v] of pairs) { n.store.set(k, v); if (n.store.size < 600) n.kf.set(k, T.vt); }
+  for (const k of deletes) n.store.delete(k);
+  n.flash = T.vt; M.writes++;
+  if (n.kind === 'primary') enqueueRepl(n.id, {pairs, deletes});
+}
+function scanKeys(n, prefix) { const out = []; for (const k of n.store.keys()) if (k.startsWith(prefix)) out.push(k); return out.sort(); }
+function scanEntries(n, prefix, id, before, limit, kind) {
+  let keys = scanKeys(n, prefix).reverse();
+  if (before) { const seek = kind === 'feed' ? feedKey(id, before.ts, before.id) : authorKey(id, before.ts, before.id); keys = keys.filter(k => k < seek); }
+  return keys.slice(0, limit).map(k => n.store.get(k));
+}
+
+/* one coordinator->node RPC with packet animation */
+async function rpc(to, label, fn, o = {}) {
+  const n = N[to];
+  if (!n.up) { await pkt('coord', to, {kind: 'fail', label, fail: true}); throw new NetErr(to); }
+  await pkt('coord', to, {kind: o.kind || 'rpc', label});
+  const r = fn(n); n.flash = T.vt; M.reads += o.reply === false ? 0 : 1;
+  if (o.reply !== false) await pkt(to, 'coord', {kind: 'resp', dur: 450});
+  return r;
+}
+async function readKey(shard, key) {
+  const tgt = readTarget(shard);
+  try { return await rpc(tgt, 'READ ' + short(key, 22), n => n.store.get(key)); }
+  catch (e) {
+    if (e instanceof NetErr && N[shard].replica && tgt === shard) {
+      log('warn', `read ${short(key, 28)} on ${shard} failed (undetected death) - one retry via ${replicaOf(shard)}`);
+      return rpc(replicaOf(shard), 'RETRY READ', n => n.store.get(key));
+    }
+    throw e;
+  }
+}
+async function userExists(id) {
+  const sh = route(id);
+  try { return !!(await readKey(sh, userKey(id))); } catch (e) { if (e instanceof NetErr) return false; throw e; }
+}
+
+/* ============================================================
+   async replication - mirrors internal/replication/replicator.go
+   one ordered channel per primary, newest dropped on overflow
+   ============================================================ */
+function applyToReplica(sid, op) { const r = N[replicaOf(sid)]; for (const [k, v] of op.pairs) { r.store.set(k, v); if (r.store.size < 600) r.kf.set(k, T.vt); } for (const k of op.deletes) r.store.delete(k); r.flash = T.vt; }
+function enqueueRepl(sid, op) {
+  if (Q.quiet) { applyToReplica(sid, op); return; }
+  const r = repl[sid];
+  if (r.q.length >= r.cap) { M.replDropped++; log('warn', `${sid}: replication buffer full (${r.cap}) - dropping NEWEST op (replica stays stale on ${op.pairs.length + op.deletes.length} key(s) until rewritten)`); return; }
+  r.q.push(op);
+  if (!r.busy) pumpRepl(sid);
+}
+async function pumpRepl(sid) {
+  const r = repl[sid]; r.busy = true;
+  while (r.q.length) {
+    const op = r.q[0];
+    await sleep(cfg.lag);
+    if (!N[sid].up) { r.q.length = 0; break; }
+    const rid = replicaOf(sid);
+    if (!N[rid].up) { await pkt(sid, rid, {kind: 'fail', label: 'POST /replicate', fail: true, dur: 800}); r.q.shift(); M.replDropped++; log('warn', `${sid}: replicate to ${rid} failed - dropped (no retry, replica stale until next write)`); continue; }
+    await pkt(sid, rid, {kind: 'repl', label: op.pairs.length + 'k'});
+    if (!N[sid].up) { r.q.length = 0; break; }
+    applyToReplica(sid, op); r.q.shift(); M.replSent++;
+    log('repl', `${sid} -> ${rid}: applied txn of ${op.pairs.length} pair(s)${op.deletes.length ? ' + ' + op.deletes.length + ' delete(s)' : ''} as absolute values`);
+  }
+  r.busy = false;
+}
+
+/* ============================================================
+   failure detection + write queue - mirrors heartbeat.go / failover.go / writequeue.go
+   ============================================================ */
+function hbLoop() {
+  ALL.forEach(async id => {
+    const n = N[id], m = mon[id];
+    if (n.up) {
+      await pkt('coord', id, {kind: 'hb', dur: 420}); await pkt(id, 'coord', {kind: 'hb', dur: 420});
+      if (!N[id].up) return;
+      const wasDown = m.down; m.misses = 0; m.down = false;
+      if (wasDown) { log('sys', `heartbeat: ${id} recovered`); if (N[id].kind === 'primary') drainQueue(id); }
+    } else {
+      await pkt('coord', id, {kind: 'fail', fail: true, dur: 900});
+      m.misses++; log('hb', `heartbeat: ${id} missed (${m.misses}/${HB_MISSES})`);
+      if (m.misses >= HB_MISSES && !m.down) { m.down = true; log('err', `heartbeat: ${id} marked DOWN after ${HB_MISSES} misses - reads fail over to ${N[id].replica || 'n/a'}`); }
+    }
+  });
+  after(HB_INTERVAL, hbLoop);
+}
+async function drainQueue(shard) {
+  const ops = wq.q.filter(o => o.node === shard); wq.q = wq.q.filter(o => o.node !== shard);
+  if (!ops.length) return;
+  log('sys', `write queue: replaying ${ops.length} queued op(s) to ${shard}, in order`);
+  for (const op of ops) {
+    await pkt('coord', shard, {kind: 'queue', label: 'replay'});
+    commit(N[shard], op.pairs, op.deletes);
+  }
+}
+function killNode(id) {
+  const n = N[id]; if (!n.up) return;
+  n.up = false;
+  if (n.kind === 'primary') { const lost = repl[id].q.length; repl[id].q.length = 0; if (lost) { M.replLost += lost; log('err', `${id} process killed - ${lost} committed-but-unreplicated op(s) lost with its in-memory replication buffer`); } }
+  log('err', `${id}: process killed (the coordinator does not know yet)`);
+}
+function restartNode(id) { const n = N[id]; if (n.up) return; n.up = true; log('sys', `${id}: process restarted (BadgerDB data on its volume is intact)`); }
+
+/* ============================================================
+   coordinator API - each handler mirrors the Go handler it is named after
+   ============================================================ */
+async function request(method, path, body, handler) {
+  log('req', `-> ${method} ${path}${body ? ' ' + JSON.stringify(body) : ''}`);
+  await pkt('client', 'coord', {kind: 'req', label: method + ' ' + path.split('?')[0].slice(0, 18)});
+  let code = 200, out;
+  try { out = await handler(); }
+  catch (e) { if (e instanceof HttpErr) { code = e.code; out = {error: e.message}; } else throw e; }
+  await pkt('coord', 'client', {kind: code < 300 ? 'ok' : 'err', label: String(code), dur: 500});
+  M.req[code] = (M.req[code] || 0) + 1; coordLast = {code, path}; coordFlash = T.vt;
+  log(code < 300 ? 'ok' : 'err', `<- ${code} ${JSON.stringify(out).slice(0, 150)}`);
+  return {code, body: out};
+}
+let microSeq = 0;
+async function micro(t) { if (Q.quiet) return; $('#sub').textContent = t; log('info', '   ' + t); await sleep(520); }
+
+const api = {
+  createUser: (id, name) => request('POST', '/users', {id, name: name || id}, async () => {
+    const sh = route(id);
+    let r;
+    try { r = await rpc(sh, 'create-user (1 txn, 3 keys)', n => { if (n.store.has(userKey(id))) return 'conflict'; commit(n, [[userKey(id), {id, name: name || id, follower_count: 0}], [followersKey(id, id), 1], [followingKey(id, id), 1]]); return 'ok'; }, {reply: false}); }
+    catch (e) { if (e instanceof NetErr) throw new HttpErr(503, 'create user failed'); throw e; }
+    if (r === 'conflict') throw new HttpErr(409, 'user already exists');
+    return {id, name: name || id};
+  }),
+  follow: (f, e) => request('POST', '/follow', {follower: f, followee: e}, () => handleEdge(f, e, false)),
+  unfollow: (f, e) => request('POST', '/unfollow', {follower: f, followee: e}, () => handleEdge(f, e, true)),
+  post: (a, c) => request('POST', '/posts', {author_id: a, content: c}, () => handlePost(a, c)),
+  feed: (u, limit = 20, before = '') => request('GET', `/feed/${u}?limit=${limit}${before ? '&before=' + before : ''}`, null, () => handleFeed(u, limit, before)),
+  user: id => request('GET', '/users/' + id, null, async () => {
+    const sh = route(id); let v;
+    try { v = await readKey(sh, userKey(id)); } catch (e) { if (e instanceof NetErr) throw new HttpErr(503, 'read failed'); throw e; }
+    if (!v) throw new HttpErr(404, 'user not found');
+    return {id: v.id, name: v.name, follower_count: v.follower_count};
+  }),
+  cluster: () => request('GET', '/cluster', null, async () => {
+    const out = [];
+    await Promise.all(SHARDS.map(async s => {
+      for (const id of [s, replicaOf(s)]) {
+        let ok = true;
+        if (N[id].up) { await pkt('coord', id, {kind: 'hb', dur: 420}); await pkt(id, 'coord', {kind: 'hb', dur: 420}); } else { await pkt('coord', id, {kind: 'fail', fail: true, dur: 900}); ok = false; }
+        out.push({id: id.startsWith('replica') ? s + '-replica' : s, role: id.startsWith('replica') ? 'replica' : 'primary', reachable: ok});
+      }
+    }));
+    return out.sort((a, b) => a.id.localeCompare(b.id));
+  })
+};
+
+async function handleEdge(f, e, unfollow) {
+  if (f === e) throw new HttpErr(400, 'cannot follow yourself');
+  if (!(await userExists(f))) throw new HttpErr(404, 'follower not found');
+  if (!(await userExists(e))) throw new HttpErr(404, 'followee not found');
+  const fs = route(f), akey = followingKey(f, e);
+  await micro(`A-side: ${unfollow ? 'delete' : 'write'} ${short(akey, 40)} on ${f}'s shard (${fs}) - naturally idempotent`);
+  if (mon[fs].down) {
+    if (wq.q.length >= wq.cap) { log('err', `write queue full (${wq.cap}) - refusing with 503 rather than silently dropping`); throw new HttpErr(503, 'write queue full'); }
+    wq.q.push({node: fs, pairs: unfollow ? [] : [[akey, 1]], deletes: unfollow ? [akey] : []});
+    coordFlash = T.vt; log('warn', `follow: A-side queued (follower shard ${fs} marked down); will replay on recovery [queue ${wq.q.length}/${wq.cap}]`);
+  } else {
+    try { await rpc(fs, (unfollow ? 'DEL ' : 'SET ') + short(akey, 20), n => unfollow ? commit(n, [], [akey]) : commit(n, [[akey, 1]]), {reply: false}); }
+    catch (err) { if (!(err instanceof NetErr)) throw err; log('warn', `A-side write to ${fs} failed (process dead, not yet marked down) - the handler does not check this error and continues to B-side`); }
+  }
+  const es = route(e);
+  await micro(`B-side: count-bearing txn on ${e}'s shard (${es}) - edge + follower_count change in ONE transaction`);
+  try {
+    const r = await rpc(es, (unfollow ? 'unfollow-edge' : 'follow-edge') + ' (1 txn)', n => {
+      const key = followersKey(e, f), has = n.store.has(key), u = n.store.get(userKey(e));
+      if (unfollow) { if (!has) return 'noop'; commit(n, [[userKey(e), {...u, follower_count: u.follower_count - 1}]], [key]); }
+      else { if (has) return 'noop'; commit(n, [[key, 1], [userKey(e), {...u, follower_count: u.follower_count + 1}]]); }
+      return 'ok';
+    }, {reply: false});
+    if (r === 'noop') log('info', 'already ' + (unfollow ? 'not following' : 'following') + ' - idempotent no-op, count unchanged');
+  } catch (err) {
+    if (err instanceof NetErr) { log('err', `half-edge: A-side written, B-side failed (${es} down) - accepted and logged (R8)`); throw new HttpErr(503, 'followee edge write failed'); }
+    throw err;
+  }
+  return {ok: true};
+}
+
+async function handlePost(author, content) {
+  if (!content || !content.trim()) throw new HttpErr(400, 'content required');
+  if (!(await userExists(author))) throw new HttpErr(404, 'author not found');
+  const sh = route(author);
+  if (mon[sh].down) { log('err', `post creation is never queued - gate + fan-out pairs live on ${sh} (design 3.4)`); throw new HttpErr(502, 'author shard unavailable'); }
+  const ts = nowTs(), id = newId(), fe = {post_id: id, author_id: author, content, timestamp: ts};
+  await micro(`1/4 coordinator stamps ts=${relTime(ts)} and post_id=${id.slice(0, 6)}...; store post + author index on ${sh} in ONE txn`);
+  try { await rpc(sh, 'WRITE posts: + posts_by_author: (1 txn)', n => commit(n, [[postKey(id), {id, author_id: author, content, timestamp: ts}], [authorKey(author, ts, id), fe]]), {reply: false}); }
+  catch (e) { if (e instanceof NetErr) throw new HttpErr(502, 'post creation failed'); throw e; }
+  await micro(`2/4 celebrity gate: read ${author}.follower_count from ${sh}`);
+  let count;
+  try { count = await rpc(sh, 'READ follower_count', n => n.store.get(userKey(author)).follower_count); }
+  catch (e) { if (e instanceof NetErr) { log('warn', 'follower count unreadable - post stored without push'); return {post_id: id, mode: 'stored-only'}; } throw e; }
+  if (count >= THRESHOLD) {
+    log('info', `post ${id.slice(0, 6)} by ${author}: celebrity lazy path (count ${count} >= threshold ${THRESHOLD}), no push`);
+    await micro(`3/4 count ${count} >= ${THRESHOLD}: CELEBRITY - skip fan-out; followers will pull this post at read time`);
+    return {post_id: id, mode: 'celebrity-lazy', follower_count: count, pushed: 0};
+  }
+  await micro(`3/4 count ${count} < ${THRESHOLD}: scan graph:followers:${author}: to find every follower`);
+  let fkeys;
+  try { fkeys = await rpc(sh, 'SCAN followers of ' + author, n => scanKeys(n, followersPrefix(author))); }
+  catch (e) { if (e instanceof NetErr) return {post_id: id, mode: 'stored-only'}; throw e; }
+  const by = {};
+  for (const k of fkeys) { const fol = lastSeg(k); (by[route(fol, {mark: fkeys.length <= 8})] ||= []).push([feedKey(fol, ts, id), fe]); }
+  await micro(`4/4 fan out ${fkeys.length} denormalized FeedEntry copies, ONE batched write per destination shard (${Object.keys(by).length} shard(s)), in parallel`);
+  let pushed = 0, skipped = 0;
+  await Promise.all(Object.entries(by).map(([s, pairs]) =>
+    rpc(s, `BATCH ${pairs.length} feed entries`, n => commit(n, pairs), {reply: false})
+      .then(() => { pushed += pairs.length; })
+      .catch(e => { if (!(e instanceof NetErr)) throw e; skipped += pairs.length; log('warn', `fanout: write to ${s} skipped (${pairs.length} entries) - partial fan-out accepted by design (R7)`); })));
+  M.pushed += pushed; M.skipped += skipped;
+  log('info', `post ${id.slice(0, 6)} by ${author}: fan-out pushed ${pushed} feed entries${skipped ? ', skipped ' + skipped : ''}`);
+  return {post_id: id, mode: 'fanout', pushed, skipped};
+}
+
+async function handleFeed(user, limit, beforeStr) {
+  const before = parseCursor(beforeStr);
+  if (!(await userExists(user))) throw new HttpErr(404, 'user not found');
+  const sh = route(user), addr = readTarget(sh);
+  await micro(`1/4 reverse-scan feed:${user}: on ${addr} (denormalized entries - one range scan, no N+1)`);
+  let fan;
+  try { fan = await rpc(addr, 'SCAN feed:' + user + ' (reverse)', n => scanEntries(n, feedPrefix(user), user, before, limit, 'feed')); }
+  catch (e) {
+    if (!(e instanceof NetErr)) throw e;
+    log('warn', `feed scan on ${addr} failed - one replica retry via ${N[sh].replica}`);
+    try { fan = await rpc(N[sh].replica, 'RETRY SCAN feed', n => scanEntries(n, feedPrefix(user), user, before, limit, 'feed')); }
+    catch (e2) { throw new HttpErr(502, 'feed unavailable'); }
+  }
+  await micro(`2/4 list who ${user} follows: scan graph:following:${user}: on ${addr}`);
+  let followees;
+  try { followees = await rpc(addr, 'SCAN following of ' + user, n => scanKeys(n, followingPrefix(user)).map(lastSeg)); }
+  catch (e) { if (e instanceof NetErr) { log('err', `followee scan hit the dead primary ${addr}; no retry on this call -> 502`); throw new HttpErr(502, 'feed unavailable'); } throw e; }
+  await micro(`3/4 for each of ${followees.length} followee(s): read follower_count (live, never cached); celebrities get an author-index scan`);
+  const cel = [], celNames = [];
+  await Promise.all(followees.map(async id => {
+    const s = route(id, {mark: followees.length <= 6});
+    try {
+      const u = await rpc(s, 'READ count ' + id, n => n.store.get(userKey(id)));
+      if (!u || u.follower_count < THRESHOLD) return;
+      celNames.push(id);
+      const es = await rpc(s, 'SCAN posts_by_author:' + id, n => scanEntries(n, authorPrefix(id), id, before, limit, 'author'));
+      cel.push(...es);
+    } catch (e) { if (!(e instanceof NetErr)) throw e; log('warn', `celebrity check/scan on ${s} failed - skipped (no failover on this path)`); }
+  }));
+  await micro(`4/4 merge both sources newest-first, dedupe by post_id, cut to limit ${limit}, build logical (ts, post_id) cursor`);
+  const ids = {fan: new Set(fan.map(e => e.post_id)), cel: new Set(cel.map(e => e.post_id))};
+  const all = [...fan, ...cel].sort((a, b) => (a.timestamp === b.timestamp ? (a.post_id < b.post_id ? 1 : -1) : (a.timestamp < b.timestamp ? 1 : -1)));
+  const seen = new Set(), merged = [];
+  for (const e of all) if (!seen.has(e.post_id)) { seen.add(e.post_id); merged.push(e); }
+  const page = merged.slice(0, limit);
+  const next = merged.length > limit ? page[page.length - 1].timestamp + ':' + page[page.length - 1].post_id : null;
+  const entries = page.map(e => ({...e, src: ids.fan.has(e.post_id) && ids.cel.has(e.post_id) ? 'both' : ids.fan.has(e.post_id) ? 'fan-out' : 'celebrity'}));
+  return {entries, next_cursor: next, _dbg: {fan: fan.length, cel: cel.length, deduped: fan.length + cel.length - merged.length, celebrities: celNames}};
+}
+
+/* quiet bulk seeding that mirrors scripts/seed/main.go (users -> follows -> posts) */
+function rawPut(shard, k, v) { N[shard].store.set(k, v); N[replicaOf(shard)].store.set(k, v); }
+function bulkFollowers(celeb, n, prefix = 'f') {
+  const cs = RING.get(celeb).node;
+  if (!N[cs].store.has(userKey(celeb))) { rawPut(cs, userKey(celeb), {id: celeb, name: celeb, follower_count: 0}); rawPut(cs, followersKey(celeb, celeb), 1); rawPut(cs, followingKey(celeb, celeb), 1); }
+  let c = N[cs].store.get(userKey(celeb)).follower_count;
+  const ids = [];
+  for (let i = 0; i < n; i++) {
+    const id = prefix + String(i).padStart(3, '0'), fs = RING.get(id).node; ids.push(id);
+    if (!N[fs].store.has(userKey(id))) { rawPut(fs, userKey(id), {id, name: id, follower_count: 0}); rawPut(fs, followersKey(id, id), 1); rawPut(fs, followingKey(id, id), 1); }
+    rawPut(fs, followingKey(id, celeb), 1); rawPut(cs, followersKey(celeb, id), 1); c++;
+  }
+  rawPut(cs, userKey(celeb), {id: celeb, name: celeb, follower_count: c});
+  return ids;
+}
+
+/* ============================================================
+   rendering
+   ============================================================ */
+let logDirty = true;
+function nodeSvg(n) {
+  const [cx, cy] = POS[n.id], x = cx - NW / 2, y = cy - NH / 2, m = mon[n.id];
+  const col = n.kind === 'replica' ? '#b78cff' : colorOf(n.id);
+  const dead = !n.up, glow = T.vt - n.flash < 450;
+  const stroke = dead ? '#6b7390' : col;
+  const own = n.kind === 'primary' ? Math.round((SHARES[n.id] || 0) * 100) : null;
+  let chip, chipc;
+  if (n.up && !m.down) { chip = 'healthy'; chipc = '#3ddc97'; }
+  else if (!n.up && !m.down) { chip = m.misses ? `DEAD - missed ${m.misses}/${HB_MISSES}` : 'DEAD - not yet detected'; chipc = '#ff5c7a'; }
+  else if (!n.up && m.down) { chip = 'MARKED DOWN'; chipc = '#ff5c7a'; }
+  else { chip = 'up - recovering'; chipc = '#ffcf5c'; }
+  const l3 = n.kind === 'primary' ? `repl buffer ${repl[n.id].q.length}/${repl[n.id].cap}` : 'replica of ' + 'shard' + n.id.slice(7);
+  return `<g>
+    <rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="12" fill="${dead ? '#141a2c' : '#101a35'}" stroke="${stroke}" stroke-width="${glow ? 4 : 2}" ${dead ? 'stroke-dasharray="7 5"' : ''} ${glow ? `filter="drop-shadow(0 0 8px ${col})"` : ''}/>
+    <text x="${cx}" y="${y + 22}" text-anchor="middle" fill="${dead ? '#8b93ad' : col}" font-size="15" font-weight="700">${n.id}</text>
+    <text x="${cx}" y="${y + 40}" text-anchor="middle" fill="#8fa0c8" font-size="11">${n.kind}${own !== null ? ' - owns ' + own + '% of ring' : ' (async copy)'}</text>
+    <text x="${cx}" y="${y + 56}" text-anchor="middle" fill="#cdd6f4" font-size="11.5">keys ${n.store.size.toLocaleString()}</text>
+    <text x="${cx}" y="${y + 70}" text-anchor="middle" fill="#8fa0c8" font-size="11">${l3}</text>
+    <rect x="${cx - 70}" y="${y + 76}" width="140" height="16" rx="8" fill="${chipc}22" stroke="${chipc}" stroke-width="1"/>
+    <text x="${cx}" y="${y + 88}" text-anchor="middle" fill="${chipc}" font-size="10.5" font-weight="700">${chip}</text>
+    ${dead ? `<text x="${cx}" y="${y + 32}" text-anchor="middle" fill="#ff5c7a" font-size="46" opacity=".35">X</text>` : ''}
+  </g>`;
+}
+let SHARES = {}, SHARES_FOR = null;
+function drawDiagram() {
+  if (SHARES_FOR !== RING) { SHARES = RING.shares(); SHARES_FOR = RING; }
+  let s = '';
+  // static edges
+  const edge = pts => `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="#243257" stroke-width="2"/>`;
+  s += edge(ROUTES['client>coord']);
+  SHARDS.forEach((sh, i) => { s += edge(ROUTES['coord>' + sh]); s += edge(ROUTES[sh + '>' + REPLICAS[i]]); s += `<polyline points="${ROUTES['coord>' + REPLICAS[i]].map(p => p.join(',')).join(' ')}" fill="none" stroke="#1f2b4d" stroke-width="1.5" stroke-dasharray="4 5"/>`; });
+  s += `<text x="500" y="470" text-anchor="middle" fill="#3a4a78" font-size="11"></text>`;
+  // client
+  s += `<g><rect x="30" y="40" width="110" height="70" rx="12" fill="#101a35" stroke="#6aa7ff" stroke-width="2"/><text x="85" y="70" text-anchor="middle" fill="#6aa7ff" font-size="15" font-weight="700">client</text><text x="85" y="90" text-anchor="middle" fill="#8fa0c8" font-size="11">curl / React UI</text></g>`;
+  // coordinator
+  const cglow = T.vt - coordFlash < 450;
+  const downCount = ALL.filter(id => mon[id].down).length;
+  s += `<g><rect x="400" y="20" width="200" height="110" rx="14" fill="#101a35" stroke="#ffd166" stroke-width="${cglow ? 4 : 2}" ${cglow ? 'filter="drop-shadow(0 0 8px #ffd166)"' : ''}/>
+    <text x="500" y="44" text-anchor="middle" fill="#ffd166" font-size="15" font-weight="700">coordinator :8080</text>
+    <text x="500" y="62" text-anchor="middle" fill="#8fa0c8" font-size="11">ring 450 vnodes - threshold ${THRESHOLD}</text>
+    <text x="500" y="79" text-anchor="middle" fill="#cdd6f4" font-size="11.5">write queue ${wq.q.length}/${wq.cap}</text>
+    <text x="500" y="95" text-anchor="middle" fill="${downCount ? '#ff5c7a' : '#8fa0c8'}" font-size="11.5">monitor: ${downCount ? downCount + ' node(s) marked down' : 'all nodes healthy'}</text>
+    <text x="500" y="115" text-anchor="middle" fill="${coordLast ? (coordLast.code < 300 ? '#3ddc97' : '#ff5c7a') : '#5d6d99'}" font-size="11.5" font-weight="700">${coordLast ? 'last: ' + coordLast.code + ' ' + esc(coordLast.path.split('?')[0].slice(0, 22)) : 'idle'}</text></g>`;
+  ALL.forEach(id => { s += nodeSvg(N[id]); });
+  // packets
+  for (const p of PK.list) {
+    const u = (T.vt - p.t0) / p.dur, pts = pathFor(p.from, p.to);
+    const c = PKCOL[p.kind] || '#fff';
+    if (p.fail) {
+      const tv = Math.min(u / 0.45, 1) * 0.72, [x, y] = along(pts, tv);
+      s += `<circle cx="${x}" cy="${y}" r="6" fill="${c}"/>`;
+      if (u > 0.45) s += `<text x="${x}" y="${y + 7}" text-anchor="middle" fill="#ff5c7a" font-size="22" font-weight="800">x</text>`;
+      if (p.label) s += `<text x="${x + 10}" y="${y - 8}" fill="#ff9aae" font-size="10.5">${esc(p.label)}</text>`;
+    } else {
+      const [x, y] = along(pts, u), r = p.kind === 'hb' ? 3.5 : p.kind === 'resp' ? 4 : 6;
+      s += `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" ${p.kind === 'hb' ? '' : `filter="drop-shadow(0 0 5px ${c})"`}/>`;
+      if (p.label && p.kind !== 'hb') s += `<text x="${x + 10}" y="${y - 8}" fill="${c}" font-size="10.5">${esc(p.label)}</text>`;
+    }
+  }
+  $('#diagram').innerHTML = s;
+}
+
+/* ring card */
+const RC = 200, RR = 150;
+const ang = p => p / 4294967296 * Math.PI * 2 - Math.PI / 2;
+function drawRingStatic() {
+  let s = `<circle cx="${RC}" cy="${RC}" r="${RR}" fill="none" stroke="#243257" stroke-width="1"/>`;
+  for (const p of RING.pos) {
+    const a = ang(p), n = RING.map.get(p), c = colorOf(n);
+    s += `<line x1="${RC + Math.cos(a) * (RR - 12)}" y1="${RC + Math.sin(a) * (RR - 12)}" x2="${RC + Math.cos(a) * (RR + 2)}" y2="${RC + Math.sin(a) * (RR + 2)}" stroke="${c}" stroke-width="1.6" opacity=".85"/>`;
+  }
+  s += `<text x="${RC}" y="${RC - 6}" text-anchor="middle" fill="#8fa0c8" font-size="12">hash space</text><text x="${RC}" y="${RC + 10}" text-anchor="middle" fill="#5d6d99" font-size="11">0 .. 2^32 (md5, first 4 bytes)</text>`;
+  $('#ringbase').innerHTML = s;
+}
+function drawMarkers() {
+  let s = '';
+  for (const m of markers) {
+    const age = T.vt - m.t0; if (age > 5000) continue;
+    const op = age > 3500 ? 1 - (age - 3500) / 1500 : 1, a = ang(m.hash), av = ang(m.vpos), c = colorOf(m.node);
+    const px = RC + Math.cos(a) * (RR + 14), py = RC + Math.sin(a) * (RR + 14), vx = RC + Math.cos(av) * (RR - 4), vy = RC + Math.sin(av) * (RR - 4);
+    s += `<g opacity="${op}"><line x1="${px}" y1="${py}" x2="${vx}" y2="${vy}" stroke="${c}" stroke-width="1.5" stroke-dasharray="3 3"/><circle cx="${px}" cy="${py}" r="5" fill="#fff"/><circle cx="${vx}" cy="${vy}" r="4" fill="${c}"/>
+    <text x="${RC + Math.cos(a) * (RR + 34)}" y="${RC + Math.sin(a) * (RR + 34) + 4}" text-anchor="${Math.cos(a) > 0 ? 'start' : 'end'}" fill="${c}" font-size="11" font-weight="700" transform="translate(${Math.cos(a) > 0 ? -22 : 22},0)">${esc(short(m.key, 12))}</text></g>`;
+  }
+  $('#ringmarks').innerHTML = s;
+}
+function drawRingInfo() {
+  const sh = RING.shares();
+  const rows = markers.slice(-5).reverse().map(m => `${esc(short(m.key, 14)).padEnd(14)} md5 ${(m.hash >>> 0).toString(16).padStart(8, '0')} (${(m.hash / 4294967296 * 100).toFixed(1)}%) -> <b style="color:${colorOf(m.node)}">${m.node}</b>`);
+  $('#rinfo').innerHTML = SHARDS.map(s => `<span style="color:${colorOf(s)}">${s} ${(sh[s] * 100).toFixed(1)}%</span>`).join(' &nbsp; ') + '<br>' + (rows.length ? rows.join('<br>') : 'lookups appear here as requests are routed');
+}
+
+/* log / metrics / inspector / output (throttled) */
+function renderLog(force) {
+  if (!logDirty && !force) return; logDirty = false;
+  const el = $('#log'), stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.innerHTML = LOG.map(l => `<div class="k-${l.kind}"><span class="t">${(l.t / 1000).toFixed(1)}s</span>${esc(l.msg)}</div>`).join('');
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+function renderMetrics() {
+  const q = SHARDS.reduce((a, s) => a + repl[s].q.length, 0), up = ALL.filter(id => N[id].up).length, dn = ALL.filter(id => mon[id].down).length;
+  const req = Object.entries(M.req).sort().map(([c, n]) => `<span style="color:${c < 300 ? '#3ddc97' : '#ff5c7a'}">${c}x${n}</span>`).join(' ') || '-';
+  const items = [['requests', req], ['shard txns committed', M.writes], ['feed entries pushed', M.pushed], ['fan-out skipped', M.skipped],
+    ['repl ops applied', M.replSent], ['repl ops dropped', M.replDropped], ['repl ops lost on crash', M.replLost], ['repl backlog', q],
+    ['write queue', wq.q.length + '/' + wq.cap], ['processes up', up + '/6'], ['marked down', dn], ['repl lag/op', cfg.lag + ' ms']];
+  $('#metrics').innerHTML = items.map(([k, v]) => `<div><span style="color:var(--mut)">${k}</span><b>${v}</b></div>`).join('');
+}
+const PFX = [['posts_by_author:', '#ffb35c'], ['graph:followers:', '#b78cff'], ['graph:following:', '#ff8fb1'], ['users:', '#6aa7ff'], ['posts:', '#c0c8e0'], ['feed:', '#3ddc97']];
+let inspSel = 'shard1';
+function valStr(k, v) {
+  if (v === 1) return '<span style="color:#5d6d99">edge</span>';
+  if (v && v.follower_count !== undefined) return `{name:${esc(v.name)}, follower_count:<b>${v.follower_count}</b>}`;
+  if (v && v.post_id) return `${esc(v.author_id)}: "${esc(v.content)}"`;
+  if (v && v.content) return `post ${esc(v.author_id)}: "${esc(v.content)}"`;
+  return esc(JSON.stringify(v));
+}
+function renderInspector() {
+  $('#chips').innerHTML = [...ALL, 'coord'].map(id => `<button data-n="${id}" class="${id === inspSel ? 'on' : ''}">${id}</button>`).join('');
+  const box = $('#insp-rows');
+  if (inspSel === 'coord') {
+    $('#icount').textContent = '';
+    box.innerHTML = `<table><tr><th>node</th><th>coordinator view</th><th>misses</th></tr>${ALL.map(id => `<tr><td class="m">${id}</td><td>${mon[id].down ? '<b style="color:#ff5c7a">DOWN</b>' : 'up'}${N[id].up ? '' : ' <span style="color:#ff5c7a">(process actually dead)</span>'}</td><td>${mon[id].misses}/${HB_MISSES}</td></tr>`).join('')}</table>
+    <h3 style="font-size:13px;margin:10px 0 4px">write queue (${wq.q.length}/${wq.cap})</h3>${wq.q.length ? `<table>${wq.q.map(o => `<tr><td class="m">${o.node}</td><td class="m">${o.pairs.length ? 'SET ' + esc(o.pairs[0][0]) : 'DEL ' + esc(o.deletes[0])}</td></tr>`).join('')}</table>` : '<span style="color:var(--mut)">empty</span>'}
+    <h3 style="font-size:13px;margin:10px 0 4px">replication buffers</h3><table>${SHARDS.map(s => `<tr><td class="m">${s} -> ${replicaOf(s)}</td><td>${repl[s].q.length}/${repl[s].cap} pending</td></tr>`).join('')}</table>`;
+    return;
+  }
+  const n = N[inspSel], filt = $('#filt').value.trim();
+  const keys = [...n.store.keys()].filter(k => !filt || k.startsWith(filt)).sort();
+  const counts = {}; for (const k of n.store.keys()) { const p = PFX.find(([x]) => k.startsWith(x)); const l = p ? p[0] : '?'; counts[l] = (counts[l] || 0) + 1; }
+  $('#icount').textContent = `${n.store.size.toLocaleString()} keys` + (n.up ? '' : ' - process is DEAD (data persists on disk)');
+  const show = keys.slice(0, 90);
+  box.innerHTML = `<div style="margin-bottom:6px;font-size:12px">${PFX.map(([p, c]) => `<span style="color:${c}">${p} ${counts[p] || 0}</span>`).join(' &nbsp; ')}</div>` +
+    `<table><tr><th>key</th><th>value</th></tr>${show.map(k => { const p = PFX.find(([x]) => k.startsWith(x)); const col = p ? p[1] : '#fff'; const fresh = T.vt - 0 < 0; return `<tr class="${recent(n, k) ? 'new' : ''}"><td class="m"><span style="color:${col}">${esc(p ? k.slice(0, p[0].length) : '')}</span>${esc(p ? k.slice(p[0].length) : k)}</td><td class="m">${valStr(k, n.store.get(k))}</td></tr>`; }).join('')}</table>` +
+    (keys.length > show.length ? `<div style="color:var(--mut);padding:6px">... ${(keys.length - show.length).toLocaleString()} more (use the filter)</div>` : '');
+}
+const recent = (n, k) => T.vt - (n.kf.get(k) ?? -1e9) < 2500;
+function setOut(html) { $('#out').innerHTML = html; }
+
+/* frame loop */
+let lastUI = 0;
+function frame() {
+  const now = performance.now(), dt = Math.min(now - T.last, 100); T.last = now;
+  if (!T.frozen) { T.vt += dt * T.speed; runTimers(); stepPackets(); }
+  drawDiagram(); drawMarkers();
+  if (now - lastUI > 220) { lastUI = now; renderLog(); renderMetrics(); renderInspector(); drawRingInfo(); $('#clock').textContent = 't=' + (T.vt / 1000).toFixed(1) + 's' + (T.frozen ? '  [paused]' : ''); liveTick(); }
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   scenario runner
+   ============================================================ */
+let runId = 0, stepNo = 0, live = null;
+function liveTick() { if (live) { try { setOut(live()); } catch (e) {} } }
+const hang = () => new Promise(() => {});
+async function step(title, text, why, fn) {
+  const me = runId;
+  stepNo++; $('#stepno').textContent = 'Step ' + stepNo; $('#title').textContent = title; $('#text').innerHTML = text; $('#why').textContent = why ? 'Why: ' + why : ''; $('#sub').textContent = '';
+  log('sys', `--- step ${stepNo}: ${title}`);
+  if (T.stepMode) { T.frozen = true; syncButtons(); await new Promise(r => { T.waiter = r; }); }
+  if (me !== runId) return hang();
+  if (fn) await fn();
+  if (me !== runId) return hang();
+  await sleep(550);
+}
+function syncButtons() { $('#bPlay').classList.toggle('on', !T.frozen && !T.stepMode); $('#bPause').classList.toggle('on', T.frozen && !T.waiter); }
+function release() { const w = T.waiter; T.waiter = null; if (w) w(); }
+$('#bPlay').onclick = () => { T.stepMode = false; T.frozen = false; release(); syncButtons(); };
+$('#bPause').onclick = () => { T.frozen = true; syncButtons(); };
+$('#bStep').onclick = () => { T.stepMode = true; T.frozen = false; release(); syncButtons(); };
+$('#bRestart').onclick = () => loadScenario(curScenario);
+$('#speed').oninput = e => { T.speed = Math.pow(2, +e.target.value); $('#speedv').textContent = (Math.round(T.speed * 100) / 100) + 'x'; };
+$('#lag').oninput = e => { cfg.lag = +e.target.value; $('#lagv').textContent = cfg.lag + ' ms'; };
+document.addEventListener('keydown', e => {
+  if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.code === 'Space') { e.preventDefault(); (T.frozen || T.waiter) ? $('#bPlay').click() : $('#bPause').click(); }
+  if (e.code === 'ArrowRight') $('#bStep').click();
+});
+$('#chips').onclick = e => { const b = e.target.closest('button'); if (b) { inspSel = b.dataset.n; renderInspector(); } };
+$('#filt').oninput = renderInspector;
+
+/* output helpers */
+const bar = (label, pct, color, val) => `<div class="row"><span class="lab">${label}</span><div class="bar"><i style="width:${Math.max(0, Math.min(100, pct))}%;background:${color}"></i></div><span class="val">${val}</span></div>`;
+const kv = o => `<table>${Object.entries(o).map(([k, v]) => `<tr><td style="color:var(--mut)">${k}</td><td class="m">${v}</td></tr>`).join('')}</table>`;
+function feedTable(res, title) {
+  const b = res.body;
+  if (res.code >= 300) return `<h3>${title}</h3><div class="big" style="color:var(--bad)">${res.code}</div><div class="note">${esc(JSON.stringify(b))}</div>`;
+  const d = b._dbg;
+  return `<h3>${title} &rarr; ${res.code}</h3><div class="note">fan-out source: ${d.fan} entr${d.fan === 1 ? 'y' : 'ies'} &middot; celebrity source: ${d.cel} &middot; duplicates removed: <b>${d.deduped}</b>${d.celebrities.length ? ' &middot; celebrities followed: ' + d.celebrities.join(', ') : ''}</div>
+  <table><tr><th>time</th><th>author</th><th>content</th><th>delivered by</th></tr>${b.entries.map(e => `<tr><td class="m">${relTime(e.timestamp)}</td><td>${esc(e.author_id)}</td><td>${esc(e.content)}</td><td><span class="badge ${e.src === 'fan-out' ? 'b-fan' : e.src === 'celebrity' ? 'b-cel' : 'b-both'}">${e.src === 'both' ? 'both (deduped)' : e.src === 'fan-out' ? 'fan-out on write' : 'celebrity read path'}</span></td></tr>`).join('') || '<tr><td colspan="4" style="color:var(--mut)">empty feed</td></tr>'}</table>
+  <div class="note">next_cursor: <span class="mono">${b.next_cursor ? esc(short(b.next_cursor, 40)) : 'null (end of feed)'}</span></div>`;
+}
+
+async function quietSetup(fn) { Q.quiet = true; try { await fn(); } finally { Q.quiet = false; } resetMetrics(); LOG = []; logDirty = true; log('sys', 'cluster seeded (setup runs instantly, not animated)'); }
+const NAMES = ['alice','bob','carol','dave','erin','frank','grace','heidi','ivan','judy','mallory','niaj','olivia','peggy','rupert'];
+
+/* ---------- A: routing ---------- */
+async function scenA() {
+  resetCluster(); drawRingStatic();
+  await step('The ring: how keys find a shard', 'Three shards each place <b>150 virtual nodes</b> on a 2^32 hash circle (<span class="mono">md5(shardID#i)</span>, first 4 bytes). A key belongs to the first virtual node clockwise from its hash. The coloured ticks on the ring are those 450 positions.', 'with one position per node a handful of nodes can own most of the arc; 150 vnodes per node evens the arcs out (design 3.2).', async () => {
+    const sh = RING.shares();
+    setOut('<h3>Arc ownership</h3>' + SHARDS.map(s => bar(s, sh[s] * 100 * 2.4, colorOf(s), (sh[s] * 100).toFixed(2) + '% of the circle')).join('') + '<div class="note">Ideal is 33.33% each.</div>');
+  });
+  await step('Routing real entity IDs', 'The coordinator hashes the <b>entity ID</b> (user / author / follower) and walks clockwise. Watch each lookup drop onto the ring: the white dot is the key\'s hash, the coloured dot is the virtual node that owns it.', 'ring lookups are O(log n): a binary search over the sorted position array.', async () => {
+    const ids = ['alice','bob','carol','dave','erin','celeb','f000','f001'], rows = [];
+    for (const id of ids) {
+      const sh = route(id); const hh = h32(id); rows.push(`<tr><td class="m">${id}</td><td class="m">${md5hex(id).slice(0, 8)}</td><td class="m">${(hh / 4294967296 * 100).toFixed(1)}%</td><td><b style="color:${colorOf(sh)}">${sh}</b></td></tr>`);
+      setOut(`<h3>Routing table</h3><table><tr><th>entity</th><th>md5[0:4]</th><th>ring position</th><th>owner</th></tr>${rows.join('')}</table>`);
+      await sleep(650);
+    }
+  });
+  await step('Why only the entity ID is hashed', 'Every key about <b>alice</b> - her user record, feed, author index, both graph edges - is routed by the string <span class="mono">alice</span>, never by the full key. So they all land on one shard and a prefix scan like <span class="mono">feed:alice:*</span> is a single-shard range read.', 'hashing the full key would scatter one feed across the ring and break the read path (design 3.2).', async () => {
+    const sh = route('alice'), ex = ['users:alice', 'feed:alice:0001750000000123456:9f3c...', 'posts_by_author:alice:0001750000000123456:9f3c...', 'graph:followers:alice:bob', 'graph:following:alice:bob'];
+    setOut(`<h3>Everything for "alice" lives on <span style="color:${colorOf(sh)}">${sh}</span></h3><table>${ex.map(k => `<tr><td class="m">${esc(k)}</td><td>routed by <b>alice</b> &rarr; <span style="color:${colorOf(sh)}">${sh}</span></td></tr>`).join('')}</table>
+      <div class="note">Cross-user edges are the exception: <span class="mono">graph:followers:alice:bob</span> is on alice's shard but the mirror edge <span class="mono">graph:following:bob:alice</span> is on bob's - that is why a follow is a cross-shard write (scenario B).</div>`);
+    await sleep(1200);
+  });
+  await step('Measured: MD5 vs FNV-1a on 10,000 keys', 'The same 10,000 sequential keys (<span class="mono">key0 .. key9999</span>) are placed on a real ring built with MD5, then on one built with FNV-1a. This is computed live in your browser, not canned.', 'FNV-1a\'s weak avalanche made sequential keys cluster onto one node; MD5 spreads them evenly.', async () => {
+    const run = hf => { const r = buildRing(SHARDS, hf), c = {shard1: 0, shard2: 0, shard3: 0}; for (let i = 0; i < 10000; i++) c[r.get('key' + i).node]++; return c; };
+    const a = run(h32), b = run(fnv32);
+    const blk = (t, c) => `<h3>${t}</h3>` + SHARDS.map(s => bar(s, c[s] / 100, colorOf(s), c[s].toLocaleString() + ' (' + (c[s] / 100).toFixed(1) + '%)')).join('');
+    setOut(blk('MD5 (what the project uses)', a) + blk('FNV-1a (rejected)', b) + '<div class="note">The exact FNV skew depends on the hash variant, but the clustering is the point.</div>');
+    await sleep(1200);
+  });
+  await step('Adding a 4th shard: ring vs modulo', 'How many of the 10,000 keys change owner when a fourth shard joins? With <span class="mono">hash % N</span> nearly everything moves; with the ring only the slice the new node takes over does.', 'consistent hashing minimizes, not eliminates, the cost of membership change.', async () => {
+    const r3 = buildRing(SHARDS), r4 = buildRing([...SHARDS, 'shard4']);
+    let ringMoved = 0, modMoved = 0;
+    for (let i = 0; i < 10000; i++) { const k = 'key' + i; if (r3.get(k).node !== r4.get(k).node) ringMoved++; if (h32(k) % 3 !== h32(k) % 4) modMoved++; }
+    setOut('<h3>Keys that change shard (of 10,000)</h3>' + bar('ring', ringMoved / 100, '#3ddc97', (ringMoved / 100).toFixed(1) + '%  (ideal 25%)') + bar('hash % N', modMoved / 100, '#ff5c7a', (modMoved / 100).toFixed(1) + '%  (theory 75%)') +
+      '<div class="note">Every moved key on the ring moves TO the new shard; nothing reshuffles between old shards.</div>');
+    await sleep(1200);
+  });
+  await step('Failure is not membership change', 'In this system a dead shard is never removed from the ring. Re-hashing on failure would strand every key it owned (the data is on that shard and its replica). Failure means <b>failover to the replica</b>; the ring stays static. Scenario F shows it live.', 'deliberate, interview-ready asymmetry (design 3.2).', async () => {
+    setOut('<h3>Ring membership is static</h3><div class="note">RemoveNode exists in <span class="mono">internal/hash/ring.go</span> for completeness but failure handling never calls it.</div>');
+  });
+}
+
+/* ---------- B: fan-out on write ---------- */
+async function scenB() {
+  resetCluster(); drawRingStatic();
+  await quietSetup(async () => {
+    for (const u of ['alice','bob','carol','dave','erin']) await api.createUser(u);
+    for (const f of ['bob','carol','dave','erin']) await api.follow(f, 'alice');
+    await api.follow('alice', 'bob');
+  });
+  await step('The cluster is up', 'Seven processes from one Go binary: a coordinator, three BadgerDB shards and three replicas. We seeded five users: bob, carol, dave and erin follow alice, and alice follows bob. Calling <span class="mono">GET /cluster</span> pings every node.', 'only the coordinator is exposed to clients; shards can never be reached directly.', async () => {
+    const r = await api.cluster();
+    setOut(`<h3>GET /cluster &rarr; ${r.code}</h3><table><tr><th>id</th><th>role</th><th>reachable</th></tr>${r.body.map(n => `<tr><td class="m">${n.id}</td><td>${n.role}</td><td style="color:${n.reachable ? '#3ddc97' : '#ff5c7a'}">${n.reachable}</td></tr>`).join('')}</table>`);
+  });
+  await step('Create a user', 'POST /users hashes <span class="mono">frank</span> to a shard and writes three keys in one transaction: the user record plus <b>both self-edges</b>. Self-follow means a normal user\'s own posts flow through the same fan-out path with no special case.', 'self-follow does not increment follower_count (design 3.3).', async () => {
+    await api.createUser('frank'); inspSel = route('frank', {mark: false});
+    setOut(`<h3>frank lives on <span style="color:${colorOf(inspSel)}">${inspSel}</span></h3><div class="note">Open the inspector tab for ${inspSel}: <span class="mono">users:frank</span> and its two <span class="mono">graph:*:frank:frank</span> edges appeared (and a moment later on its replica).</div>`);
+  });
+  await step('A follow is a cross-shard, two-edge write', 'frank follows alice. <b>A-side</b>: <span class="mono">graph:following:frank:alice</span> on frank\'s shard (a plain idempotent set). <b>B-side</b>: on alice\'s shard, a conditional transaction writes <span class="mono">graph:followers:alice:frank</span> <b>and</b> increments alice.follower_count atomically.', 'the count is the celebrity gate, so it must always equal the number of real follower edges (design 3.3).', async () => {
+    const as = route('alice', {mark: false}); const before = N[as].store.get(userKey('alice')).follower_count;
+    await api.follow('frank', 'alice'); const after2 = N[as].store.get(userKey('alice')).follower_count;
+    setOut(`<h3>alice.follower_count</h3><div class="big">${before} &rarr; ${after2}</div><div class="note">Repeating the same follow is a no-op: the edge exists so the count is untouched.</div>`);
+  });
+  await step('alice posts: fan-out on write', 'Watch the log line "1/4 .. 4/4" captions above the diagram. The post and its author-index entry commit on alice\'s shard first, the follower count is read (5 &lt; 1000 so push), the follower set is scanned, then one denormalized <b>FeedEntry copy per follower</b> is written, batched per destination shard.', 'the post is durable before any fan-out, so a fan-out failure never loses it.', async () => {
+    const r = await api.post('alice', 'Hello distributed world');
+    setOut(`<h3>POST /posts &rarr; ${r.code}</h3>${kv({mode: r.body.mode, 'feed entries pushed': r.body.pushed, 'post id': r.body.post_id})}`);
+  });
+  await step('Where did the copies land?', 'The post exists once as <span class="mono">posts:{id}</span>, once in the author index, and as a copy in <b>every follower\'s</b> feed on <b>that follower\'s</b> shard. Click through the inspector tabs, or filter by <span class="mono">feed:</span>.', 'denormalized content means a feed renders in one range scan with no N+1 post fetches - paid for with storage amplification.', async () => {
+    const rows = [];
+    for (const u of ['alice','bob','carol','dave','erin','frank']) { const s = RING.get(u).node; const ks = scanKeys(N[s], feedPrefix(u)); rows.push(`<tr><td>${u}</td><td><b style="color:${colorOf(s)}">${s}</b></td><td class="m">${ks.length} feed entr${ks.length === 1 ? 'y' : 'ies'}</td></tr>`); }
+    setOut(`<h3>feed:{user}: copies</h3><table><tr><th>user</th><th>shard</th><th>copies</th></tr>${rows.join('')}</table><div class="note">frank followed before the post, so frank has a copy too. There is no backfill: someone who follows later never sees older posts (seed order matters: users, follows, then posts).</div>`);
+  });
+  await step('Reading is cheap', 'bob loads his feed. alice is not a celebrity, so there is nothing to merge: one reverse range scan of <span class="mono">feed:bob:</span> already contains her post, with its content.', 'normal posts are cheap to read because they are already in the feed.', async () => {
+    const r = await api.feed('bob', 10); setOut(feedTable(r, 'GET /feed/bob'));
+  });
+  await step('The amplification tradeoff', 'One post produced 2 writes on the author shard plus one feed copy per follower. For alice (5 followers plus herself) that is 6 + 2. For an account with a million followers it would be a million copies per post, unbounded - which is exactly why the next scenario exists.', 'write amplification is the cost; the hybrid threshold (1000) is the cap.', async () => {
+    setOut(`<h3>Writes for one post</h3>${bar('alice (5 + self)', 8 / 10, '#3ddc97', '2 + 6 = 8 keys')}${bar('1,000 followers', 100, '#ffb35c', '2 + 1,000')}${bar('1,000,000 followers', 100, '#ff5c7a', '2 + 1,000,000 (!)')}`);
+  });
+}
+
+/* ---------- C: celebrity lazy path ---------- */
+async function scenC() {
+  resetCluster(); drawRingStatic();
+  await quietSetup(async () => {
+    await api.createUser('alice'); await api.createUser('bob'); bulkFollowers('celeb', 1001, 'f');
+    await api.follow('f000', 'alice');
+  });
+  await step('Meet the celebrity', '<b>celeb</b> has 1,001 real followers (f000 ... f1000) - threshold 1,000 plus one, so a single lost increment cannot silently flip the path. f000 also follows alice.', 'the seed script uses 1001 deliberately (README, scripts/seed).', async () => {
+    const r = await api.user('celeb'); inspSel = RING.get('celeb').node;
+    setOut(`<h3>GET /users/celeb &rarr; ${r.code}</h3>${kv(r.body)}<div class="note">celeb's shard is <b>${inspSel}</b>: open its inspector tab to see 1,001 <span class="mono">graph:followers:celeb:*</span> keys.</div>`);
+  });
+  await step('The celebrity posts: no fan-out', 'The post and author index are stored on celeb\'s shard. The gate reads follower_count = 1001 &ge; 1000, so the coordinator <b>stops</b>. Zero feed entries are written to followers.', 'pushing this post would mean 1,001 writes per celebrity post, fanned over every shard.', async () => {
+    const before = M.pushed, r = await api.post('celeb', 'Big announcement from the celebrity');
+    setOut(`<h3>POST /posts &rarr; ${r.code}</h3>${kv({mode: r.body.mode, 'follower_count': r.body.follower_count, 'feed entries pushed': r.body.pushed})}${bar('naive fan-out', 100, '#ff5c7a', '1,001 writes')}${bar('hybrid (this)', 0.3, '#3ddc97', '0 writes')}`);
+  });
+  await step('alice posts: normal fan-out still works', 'alice has 2 followers (herself and f000), so her post is pushed eagerly into f000\'s feed.', 'both paths coexist; the author\'s follower count picks one per post.', async () => {
+    const r = await api.post('alice', 'A normal post from alice');
+    setOut(`<h3>POST /posts &rarr; ${r.code}</h3>${kv({mode: r.body.mode, 'feed entries pushed': r.body.pushed})}`);
+  });
+  await step('f000 loads their feed: two sources merged', 'The feed read does four things: scan the pushed entries; list followees (self, alice, celeb); read each followee\'s <b>live</b> follower_count; for those over the threshold, scan the author index. Then merge newest-first and dedupe.', 'the count is read live, not cached: a stale celebrity flag silently takes the wrong path.', async () => {
+    const r = await api.feed('f000', 10); setOut(feedTable(r, 'GET /feed/f000'));
+  });
+  await step('Pagination across two sources', 'A merged page spans <span class="mono">feed:f000:*</span> on one shard and <span class="mono">posts_by_author:celeb:*</span> on another, so no single physical key can seek into both. The cursor is the <b>logical (timestamp, post_id)</b>; each source rebuilds its own seek key from it. Page size 1: first page, then the cursor page.', 'a physical-key cursor works with no celebrities and then drops or repeats celebrity posts at page boundaries.', async () => {
+    const p1 = await api.feed('f000', 1);
+    const cur = p1.body.next_cursor; let html = feedTable(p1, 'page 1 (limit 1)');
+    setOut(html);
+    await sleep(900);
+    const p2 = await api.feed('f000', 1, cur); html += feedTable(p2, 'page 2 (before=cursor)'); setOut(html);
+  });
+  await step('Why the lazy path is bounded', 'The celebrity read path costs one author-index range scan <b>per celebrity followed</b>, on the celebrity\'s own shard - O(celebrities followed), not O(followers). That is what the author index (<span class="mono">posts_by_author:</span>) was added for.', 'the key that made the celebrity path bounded (design 3.4).', async () => {
+    setOut('<h3>Cost model</h3>' + bar('push, per post', 100, '#ff5c7a', 'O(followers)') + bar('pull, per feed read', 12, '#3ddc97', 'O(celebrities followed)'));
+  });
+}
+
+/* ---------- D: threshold crossing ---------- */
+async function scenD() {
+  resetCluster(); drawRingStatic();
+  await quietSetup(async () => { bulkFollowers('star', 998, 'f'); await api.createUser('z1'); await api.createUser('z2'); });
+  const starShard = () => RING.get('star').node, cnt = () => N[starShard()].store.get(userKey('star')).follower_count;
+  await step('star has 998 followers', 'One user, <b>star</b>, sits just under the threshold of 1,000. (Plus the self edge, so a fan-out reaches 999 feeds.)', 'the gate is a plain number compare against a live count.', async () => {
+    live = () => `<h3>star.follower_count</h3><div class="big">${cnt()}</div><div class="note">threshold = ${THRESHOLD}: ${cnt() >= THRESHOLD ? '<b style="color:#ffb35c">CELEBRITY</b> (lazy read path)' : '<b style="color:#3ddc97">normal</b> (fan-out on write)'}</div>`;
+  });
+  await step('Post #1 at 998 followers: eager fan-out', 'Below the threshold, star\'s post is pushed to every follower: ~999 feed entries in one batched write per shard (3 packets, not 999).', 'one batch per shard keeps the coordinator\'s round trips at N shards, not N followers.', async () => {
+    const r = await api.post('star', 'First post (pushed to every follower)'); window.__p1 = r.body.post_id;
+  });
+  await step('Two more people follow', 'z1 and z2 follow star. 998 &rarr; 999 &rarr; 1000. The follower count crosses the threshold.', 'a follow is a conditional count-bearing transaction, so the count stays exact even under concurrency (optimistic concurrency + retry).', async () => {
+    await api.follow('z1', 'star'); await api.follow('z2', 'star');
+  });
+  await step('Post #2 at 1000 followers: lazy', 'Now count = 1000 &ge; 1000: the gate trips and star is a celebrity. <b>No</b> feed entries are written for this post.', 'status can change after a follow, so the flag cannot be cached.', async () => {
+    const r = await api.post('star', 'Second post (celebrity: pulled at read time)'); live = null;
+    setOut(`<h3>POST /posts &rarr; ${r.code}</h3>${kv({mode: r.body.mode, 'follower_count': r.body.follower_count, 'feed entries pushed': r.body.pushed})}`);
+  });
+  await step('A follower reads: the threshold-crossing duplicate', 'Post #1 was pushed into f000\'s feed <i>and</i> is also in star\'s author index (which the read path now scans because star is now a celebrity). The same post arrives from both sources.', 'dedupe by post_id on merge kills the duplicate artifact (design 3.4).', async () => {
+    const r = await api.feed('f000', 10); setOut(feedTable(r, 'GET /feed/f000'));
+  });
+}
+
+/* ---------- E: replication ---------- */
+async function scenE() {
+  resetCluster(); drawRingStatic(); cfg.lag = 1200; $('#lag').value = 1200; $('#lagv').textContent = '1200 ms';
+  await quietSetup(async () => { for (const u of ['hot', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) await api.createUser(u); });
+  const hs = RING.get('hot').node, hr = replicaOf(hs); inspSel = hs;
+  const view = () => { const p = N[hs], r = N[hr]; const pe = scanKeys(p, followersPrefix('hot')).length, re = scanKeys(r, followersPrefix('hot')).length, pc = p.store.get(userKey('hot')).follower_count, rc = r.store.get(userKey('hot')).follower_count;
+    return `<h3>"hot" on <span style="color:${colorOf(hs)}">${hs}</span> vs <span style="color:#b78cff">${hr}</span></h3><table><tr><th></th><th>primary</th><th>replica</th></tr><tr><td>follower_count</td><td class="m">${pc}</td><td class="m" style="color:${pc === rc ? '#3ddc97' : '#ffcf5c'}">${rc}</td></tr><tr><td>follower edges</td><td class="m">${pe}</td><td class="m" style="color:${pe === re ? '#3ddc97' : '#ffcf5c'}">${re}</td></tr></table>
+    <div class="note">replication buffer ${repl[hs].q.length}/${repl[hs].cap} &middot; applied ${M.replSent} &middot; dropped ${M.replDropped} &middot; lost ${M.replLost}</div>`; };
+  await step('Setup: one hot user and its replica', 'The user <b>hot</b> lives on a primary and has a replica. Replication lag is exaggerated to 1.2 s per op (slider at the top) so you can see it. The panel below tracks the primary vs replica in real time.', 'a replica is a full copy kept eventually consistent - it exists for failover, not read scaling.', async () => { live = view; });
+  await step('Follow #1: one transaction, one payload', 'a follows hot. The primary commits edge + count in ONE transaction and enqueues <b>one</b> payload of absolute final values. The replica applies edge and count together, so it can never show an edge without its count.', 'unit of work is the transaction, not the key (design 3.5).', async () => { await api.follow('a', 'hot'); await sleep(2000); });
+  await step('Ordering: three quick follows', 'b, c, d follow hot back-to-back. The replicator is <b>one ordered channel drained by a single goroutine</b>: payloads apply in enqueue order. The replica goes 1 &rarr; 2 &rarr; 3 &rarr; 4, never out of order.', 'per-write goroutines could deliver count 6 then 5 and leave the replica wrong; absolute values + one channel make it order-safe.', async () => {
+    await Promise.all([api.follow('b', 'hot'), api.follow('c', 'hot'), api.follow('d', 'hot')]); await sleep(6000);
+  });
+  await step('Overflow: the buffer is tiny and the burst is big', 'We shrink the replication buffer to <b>2</b> and fire three more follows in a burst. Enqueue never blocks the primary: when the buffer is full the <b>newest</b> op is dropped. The primary is correct; the replica is now missing writes.', 'replication never sits on the primary\'s write latency; no ack, no retry (design 3.5).', async () => {
+    repl[hs].cap = 2; await Promise.all([api.follow('e', 'hot'), api.follow('f', 'hot'), api.follow('g', 'hot')]); await sleep(5000);
+  });
+  await step('Self-healing, and its limit', 'Any later write re-sends a fresh absolute <b>count</b>, so the count converges. But the dropped <b>edge keys</b> were different keys and are never re-sent. Watch the replica\'s count match while its edge total stays short. This is the documented async gap.', 'the system self-heals keys that are rewritten, not keys that were skipped.', async () => {
+    repl[hs].cap = 4096; await api.unfollow('a', 'hot'); await api.follow('a', 'hot'); await sleep(5000);
+  });
+  await step('The real risk: primary dies before replication catches up', 'One more follow is acknowledged (200), then the primary process is killed <b>before</b> its replica applied it. The pending op lives only in the primary\'s memory, so it is lost. Async replication means a non-zero loss window on failover.', 'CAP in practice: we chose availability + speed over zero-loss (design 4).', async () => {
+    cfg.lag = 3000; await api.follow('h', 'hot'); killNode(hs); await sleep(600);
+    live = () => view() + '<div class="note" style="color:#ff9aae">primary killed; the replica is all that is left. The acknowledged write above never reached it.</div>';
+  });
+}
+
+/* ---------- F: failover drill ---------- */
+async function scenF() {
+  resetCluster(); drawRingStatic(); cfg.lag = 250; $('#lag').value = 250; $('#lagv').textContent = '250 ms';
+  const V = RING.get('alice').node, VR = replicaOf(V);
+  const vUsers = NAMES.filter(n => RING.get(n).node === V), oUsers = NAMES.filter(n => RING.get(n).node !== V);
+  const v2 = vUsers.find(n => n !== 'alice') || 'bob', x1 = oUsers[0], x2 = oUsers[1];
+  await quietSetup(async () => {
+    for (const u of ['alice', v2, x1, x2]) await api.createUser(u);
+    await api.follow(v2, 'alice'); await api.follow(x1, 'alice'); await api.follow('alice', x1);
+    await api.post('alice', 'Hello from alice before the outage');
+  });
+  inspSel = V;
+  await step('Baseline: everything healthy', `The victim will be <b>${V}</b> (the primary that owns alice). Users on it: ${vUsers.join(', ')}. alice is followed by ${v2} and ${x1}; alice also follows ${x1}. <span class="mono">GET /cluster</span> pings every node; ${v2}'s feed holds alice's pre-outage post.`, 'we first prove the happy path so the failure is attributable.', async () => {
+    const c = await api.cluster(); const f = await api.feed(v2, 10); setOut(`<h3>GET /cluster</h3>${c.body.map(n => `<span class="badge b-fan">${n.id}: ok</span> `).join('')}` + feedTable(f, `GET /feed/${v2}`));
+  });
+  await step(`Kill ${V}`, `The ${V} process dies (as <span class="mono">docker stop</span> would). Notice the diagram: dead, but the coordinator still thinks it is healthy - detection takes up to 3 missed heartbeats (~15 s).`, 'a coordinator can only know what its heartbeat has told it.', async () => { killNode(V); setOut(`<h3>${V} is dead</h3><div class="note">Process gone; its data directory on disk (and its replica ${VR}, which has the replicated data) are intact.</div>`); });
+  await step('The undetected window', `Before the heartbeat notices, ${v2} asks for their feed. Single-key reads (the user lookup, the feed scan) hit the dead primary, time out, and <b>retry once via the replica</b>. Then comes the followee-list scan - it targets the same dead primary and has no retry, so the request fails. Watch the retries and the red timeout.`, 'the retry path is partial: reads are not fully covered until the node is marked down. (This mirrors internal/api/reader.go as written.)', async () => {
+    const f = await api.feed(v2, 10); setOut(feedTable(f, `GET /feed/${v2} (undetected window)`));
+  });
+  await step('Heartbeats count the misses', `The coordinator pings every node every 5 s. Watch ${V} accumulate misses 1/3, 2/3, 3/3 in the node chip and the log, then flip to <b>MARKED DOWN</b>. (The simulation runs on a virtual clock, so use the speed slider to go faster.)`, 'three misses (~15 s) trade detection speed against false positives.', async () => {
+    live = () => `<h3>Heartbeat monitor</h3><div class="big">${V}: ${mon[V].down ? '<span style="color:#ff5c7a">MARKED DOWN</span>' : mon[V].misses + ' / ' + HB_MISSES + ' misses'}</div>`;
+    while (!mon[V].down) await sleep(400);
+    live = null;
+  });
+  await step('Reads fail over to the replica', `Now the monitor says ${V} is down, so every read for its users is routed straight to ${VR} - no timeout, no retry. ${v2}'s feed and alice's data are all there, served from the async copy. The ring is untouched.`, 'failover changes which address serves reads, not which shard owns the key (design 3.5).', async () => {
+    const f = await api.feed(v2, 10); inspSel = VR; setOut(feedTable(f, `GET /feed/${v2} (served by ${VR})`));
+  });
+  await step('Writes: posts are refused, follows are queued', `<b>POST /posts</b> by alice needs the celebrity gate and the fan-out pairs from the down shard, so it cannot be built offline: it returns <b>502</b> and is never queued. Contrast with follows below.`, 'a queued post would drain as post + index and silently lose fan-out.', async () => {
+    const r = await api.post('alice', 'Posting during the outage'); setOut(`<h3>POST /posts &rarr; ${r.code}</h3><div class="note">${esc(JSON.stringify(r.body))} - the client sees the failure instead of a silent loss.</div>`);
+  });
+  await step('The bounded write queue', `A follow by a user on ${V} has an A-side edge that can be written without reading the dead shard, so it is queued in the coordinator (<b>200</b>). The queue is deliberately tiny here (cap 2). Two follows are queued; the third returns <b>503</b>, never a silent drop.`, 'overflow is refused loudly: acknowledging loss on a 200 is the worst outcome (design 3.5).', async () => {
+    wq.cap = 2; $('#pq').value = 2;
+    const r1 = await api.follow(v2, x1), r2 = await api.follow(v2, x2), r3 = await api.follow('alice', x2); inspSel = 'coord';
+    setOut(`<h3>Write queue (cap 2)</h3>${kv({[v2 + ' -> ' + x1]: r1.code + ' (queued)', [v2 + ' -> ' + x2]: r2.code + ' (queued)', ['alice -> ' + x2]: r3.code + ' (queue full)'})}`);
+  });
+  await step('Partial fan-out is accepted', `${x1} posts. ${x1}'s followers include alice and ${v2}, whose feeds live on the dead ${V}. Fan-out writes to the healthy shards succeed; the batch to ${V} is skipped and logged (R7). The post itself is stored, and the author gets <b>200</b>.`, 'one lost fan-out batch must not fail the post; there is no backfill.', async () => {
+    const r = await api.post(x1, 'Post while a shard is down'); setOut(`<h3>POST /posts as ${x1} &rarr; ${r.code}</h3>${kv({mode: r.body.mode, pushed: r.body.pushed, 'skipped (dead shard)': r.body.skipped})}`);
+  });
+  await step(`Restart ${V}`, `Bring the process back. On the next heartbeat the coordinator sees it healthy, flips it back, and <b>replays the queued follow edges in order</b> (absolute values, so replaying is idempotent).`, 'recovery is detect, then drain, no operator action.', async () => {
+    restartNode(V); inspSel = 'coord';
+    while (mon[V].down || wq.q.length) await sleep(400);
+    await sleep(2500); inspSel = V;
+  });
+  await step('Verify: what healed and what did not', `Everything is back on the primary. The queued edges exist, the node is green and the queue is empty. But ${x1}'s outage-time post is <b>not</b> in alice's feed: fan-out skipped her shard and nothing backfills it. That is the accepted gap.`, 'honest boundaries beat hand-waving in an interview (design 6).', async () => {
+    const f = await api.feed('alice', 10);
+    setOut(feedTable(f, 'GET /feed/alice (after recovery)') + `<div class="note">Queued edges present: <b>${N[V].store.has(followingKey(v2, x1)) && N[V].store.has(followingKey(v2, x2))}</b> &middot; write queue: <b>${wq.q.length}</b></div>`);
+  });
+}
+
+/* ---------- G: free play ---------- */
+async function scenG() {
+  resetCluster(); drawRingStatic();
+  await step('Free play', 'The cluster is empty. Use the panel under the diagram: <b>Seed small graph</b>, then try posts and feeds; <b>Add celebrity</b> creates the 1001-follower account; kill and restart nodes at will. Press Play to start the clock.', 'everything here is the same engine the guided scenarios use.', async () => { T.stepMode = false; T.frozen = false; syncButtons(); });
+}
+
+const SCEN = [['A', 'A. Routing & ring', scenA], ['B', 'B. Fan-out on write', scenB], ['C', 'C. Celebrity lazy read', scenC], ['D', 'D. Threshold crossing', scenD], ['E', 'E. Async replication', scenE], ['F', 'F. Failover drill', scenF], ['G', 'G. Free play', scenG]];
+async function tour() {
+  for (const [id, , fn] of SCEN) { if (id === 'G') continue; stepNo = 0; await fn(); await step('End of chapter ' + id, 'Next chapter loads automatically.', '', null); }
+  stepNo = 0; await step('Tour complete', 'That is the whole system: hash ring routing, hybrid fan-out, async replication and heartbeat failover. Pick any scenario to replay it.', '', null);
+}
+SCEN.push(['T', 'Full tour (A-F)', tour]);
+let curScenario = 'A';
+function loadScenario(id) {
+  curScenario = id; runId++; stepNo = 0; live = null; Q.quiet = false; release(); T.waiter = null; T.stepMode = true; T.frozen = true; cfg.lag = 400; $('#lag').value = 400; $('#lagv').textContent = '400 ms';
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.id === id));
+  $('#play').classList.toggle('show', id === 'G');
+  $('#title').textContent = 'Loading...'; $('#text').textContent = ''; $('#why').textContent = ''; $('#sub').textContent = '';
+  const fn = SCEN.find(s => s[0] === id)[2];
+  fn().catch(e => { console.error(e); log('err', 'scenario error: ' + e.message); });
+  syncButtons();
+}
+$('#tabs').innerHTML = SCEN.map(([id, name]) => `<button data-id="${id}">${name}</button>`).join('');
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if (b) loadScenario(b.dataset.id); };
+
+/* free-play controls */
+$('#pn').innerHTML = ALL.map(i => `<option>${i}</option>`).join('');
+$('#play').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (T.frozen) { T.stepMode = false; T.frozen = false; release(); syncButtons(); }
+  const v = id => $('#' + id).value.trim();
+  switch (b.dataset.a) {
+    case 'seed': await quietSetup(async () => { for (const u of ['alice','bob','carol','dave','erin']) await api.createUser(u); for (const f of ['bob','carol','dave','erin']) await api.follow(f, 'alice'); await api.follow('alice', 'bob'); }); break;
+    case 'celeb': await quietSetup(async () => { bulkFollowers('celeb', 1001, 'f'); }); break;
+    case 'cluster': { const r = await api.cluster(); setOut(`<h3>GET /cluster</h3><table>${r.body.map(n => `<tr><td class="m">${n.id}</td><td>${n.role}</td><td style="color:${n.reachable ? '#3ddc97' : '#ff5c7a'}">${n.reachable}</td></tr>`).join('')}</table>`); break; }
+    case 'user': await api.createUser(v('pu')); break;
+    case 'follow': await api.follow(v('pf'), v('pe')); break;
+    case 'unfollow': await api.unfollow(v('pf'), v('pe')); break;
+    case 'post': { const r = await api.post(v('pa'), $('#pc').value); setOut(`<h3>POST /posts &rarr; ${r.code}</h3>${kv(r.body)}`); break; }
+    case 'feed': { const r = await api.feed(v('pv'), +v('pl') || 10, v('pb')); setOut(feedTable(r, 'GET /feed/' + v('pv'))); break; }
+    case 'kill': killNode($('#pn').value); break;
+    case 'restart': restartNode($('#pn').value); break;
+    case 'cap': wq.cap = +v('pq') || 1024; break;
+  }
+};
+
+/* boot */
+$('#ring').innerHTML = '<g id="ringbase"></g><g id="ringmarks"></g>';
+resetCluster(); drawRingStatic();
+requestAnimationFrame(frame);
+loadScenario('A');
+window.__sim = {md5hex, h32, RING: () => RING, buildRing, SHARDS};
+</script>
+</body>
+</html>
